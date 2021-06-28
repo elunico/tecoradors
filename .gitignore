@@ -1,0 +1,6 @@
+venv
+.idea
+tecoradors_elunico.egg-info
+dist
+build
+__pycache__
