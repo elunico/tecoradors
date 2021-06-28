@@ -2,9 +2,13 @@
 
 Python decorators that I like to use a lot.
 
+[Find the github repo here](https://github.com/elunico/tecoradors)
+
+[Find the pypi package here](https://pypi.org/project/tecoradors-elunico/)
+
 Named based on my name which starts with a T.
 
-Includes
+### Decorators are 
   *  accepts
   *  json_serializable
   *  spread
@@ -14,3 +18,8 @@ Includes
   *  equatable
   *  hashable
   *  dataclass
+  *  final
+  *  freeze
+
+### Support from 
+  *  Self (class)
