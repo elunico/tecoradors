@@ -1,5 +1,9 @@
 #!/usr/bin/env zsh
 
+
+python -m twine --version 1>/dev/null 2>&1 || python -m pip install twine
+python -m wheel version 1>/dev/null 2>&1 || python -m pip install wheel
+
 echo -n 'Did you increment the version number (y/n)? '
 read -q
 echo

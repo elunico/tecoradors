@@ -4,6 +4,7 @@ import functools
 import inspect
 import time
 import types
+import warnings
 from functools import reduce
 from typing import *
 
@@ -378,3 +379,21 @@ def freeze(cls):
         return instance
 
     return wrapper
+
+
+def deprecated(reason: str,
+               replacement: str,
+               starting_version: Optional[str] = None,
+               removed_version: Optional[str] = None):
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            warnings.warn('function {!r} is deprecated: {!r}. Use {!r} instead.'.format(fn.__name__, reason, replacement), category=DeprecationWarning, stacklevel=2)
+            return fn(*args, **kwargs)
+
+        setattr(wrapper, 'deprecation_reason', reason)
+        setattr(wrapper, 'deprecation_starting_in', starting_version)
+        setattr(wrapper, 'deprecation_remove_in', removed_version)
+        return wrapper
+
+    return decorator

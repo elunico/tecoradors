@@ -12,6 +12,7 @@ __all__ = [
     "dataclass",
     "Self",
     "freeze",
-    "final"
+    "final",
+    "deprecated"
 ]
 
