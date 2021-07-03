@@ -4,9 +4,8 @@ import functools
 import inspect
 import time
 import types
+import typing
 import warnings
-from functools import reduce
-from typing import *
 
 
 # taken from https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3
@@ -71,31 +70,32 @@ class Self(type):
                 self.name = name
     """
 
-    def __new__(*args):
+    def __new__(mcs, *args):
         raise TypeError("Do not construct Self(), use the class Self instead")
 
 
 def _isiterable(t):
     try:
-        i = iter(t)
+        iter(t)
         return True
     except TypeError:
         return False
 
 
-def accepts(*types: Union[type, Tuple[type]]):
+def accepts(*types: typing.Union[type, typing.Tuple[type]]):
     """
     Provides a declaration-site and run-time check of the types of the arguments passed to a function or method
 
-    Pass 1 instance of a type per argument or, if multiple types are acceptable, pass a tuple of types for that argument.
+    Pass 1 instance of a type per argument or, if multiple types are acceptable, pass a tuple of types for the argument.
     Ultimately, these types or tuples of types will be used in isinstance() checks. So subclasses will be accepted
 
     Note that when annotating methods (instance or class), DO NOT PASS A TYPE FOR 'self' OR 'cls' parameters.
-    The parameters 'self' and 'cls' are NEVER CHECKED by this decorator if they appear as the first parameter in a method.
+    The parameters 'self' and 'cls' are NEVER CHECKED by this decorator if they appear as the first
+    parameter in a method.
 
     See Also: Self
 
-    :param types: a splat of types or tuples of types that will be matched 1 to 1 against the types of the args to the function
+    :param types: a splat of types or tuples of types to be matched 1 to 1 against the types of the args to the function
     :return: a decorator which wraps a function and does a run time type check on all arguments against the types
              given EXCEPT for 'self' and 'cls' first args
 
@@ -124,21 +124,21 @@ def accepts(*types: Union[type, Tuple[type]]):
             else:
                 t = _get_class_that_defined_method(f) if t is Self else t
                 assert t is not None, f"Cannot accept Self on non-bound method {f.__name__}"
-            assert isinstance(a,
-                              t), f"{f.__name__}: got argument {a} (type of {type(a)}) but expected argument of type(s) {t}"
+            assert isinstance(a, t), f"{f.__name__}: got argument {a} (type of {type(a)}) " + \
+                                     f"but expected argument of type(s) {t}"
 
         def _check_callable(a, t):
             try:
                 assert t(a), f'function received {a} which did pass the type check {t}'
-            except AssertionError as e:
+            except AssertionError:
                 raise
             except Exception as e:
                 raise AssertionError(f"Function could not validate parameter {a} with function {t}") from e
 
         return new_f
 
-    def check_self_or_cls(vnames):
-        return len(vnames) > 0 and (vnames[0] == 'self' or vnames[0] == 'cls')
+    def check_self_or_cls(var_names):
+        return len(var_names) > 0 and (var_names[0] == 'self' or var_names[0] == 'cls')
 
     return check_accepts
 
@@ -150,6 +150,7 @@ def json_serializable(cls):
     object's __dict__ attribute
     """
     import json
+
     class MyEncoder(json.JSONEncoder):
         def default(self, o):
             return o.__dict__
@@ -201,13 +202,13 @@ def timed(fn):
     return wrapper
 
 
-TupleOfExceptionTypes = Tuple[Type[BaseException]]
-AnyFunction = Callable[[Any], Any]
-ExceptionCallback = Callable[[BaseException], Any]
+TupleOfExceptionTypes = typing.Tuple[typing.Type[BaseException]]
+AnyFunction = typing.Callable[[typing.Any], typing.Any]
+ExceptionCallback = typing.Callable[[BaseException], typing.Any]
 
 
-def squash(exceptions: Union[TupleOfExceptionTypes, AnyFunction] = (Exception,),
-           on_squashed: Union[Optional[Any], ExceptionCallback] = None):
+def squash(exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Exception,),
+           on_squashed: typing.Union[typing.Optional[typing.Any], ExceptionCallback] = None):
     """
     returns a function that handles exceptions differently.
 
@@ -332,7 +333,7 @@ def hashable(cls):
                 fmt_str = "value of type {} can't be hashed because the field {}={} (type={}) is not hashable"
                 str_format = fmt_str.format(repr(cls.__name__), repr(name), repr(value), repr(type(value).__name__))
                 raise TypeError(str_format)
-        return super(cls, self).__hash__() ^ reduce(hasher, self.__dict__.values(), 0)
+        return super(cls, self).__hash__() ^ functools.reduce(hasher, self.__dict__.values(), 0)
 
     setattr(cls, '__hash__', __hash__)
     return cls
@@ -363,32 +364,15 @@ def final(cls):
     return cls
 
 
-def freeze(cls):
-    """Makes a class final (see above) and blocks both __setattr__ and __setitem__
-    by throwing an exception when those methods are called"""
-    cls = final(cls)
-
-    def wrapper(*args, **kwargs):
-        instance = cls(*args, **kwargs)
-
-        def error(*args, **kwargs):
-            raise TypeError('Class {} is frozen (immutable)'.format(cls.__name__))
-
-        instance.__setattr__ = error.__get__(instance, cls)
-        instance.__setitem__ = error.__get__(instance, cls)
-        return instance
-
-    return wrapper
-
-
 def deprecated(reason: str,
                replacement: str,
-               starting_version: Optional[str] = None,
-               removed_version: Optional[str] = None):
+               starting_version: typing.Optional[str] = None,
+               removed_version: typing.Optional[str] = None):
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            warnings.warn('function {!r} is deprecated: {!r}. Use {!r} instead.'.format(fn.__name__, reason, replacement), category=DeprecationWarning, stacklevel=2)
+            warnings.warn(f'function {fn.__name__!r} is deprecated: {reason!r}. Use {replacement!r} instead.',
+                          category=DeprecationWarning, stacklevel=2)
             return fn(*args, **kwargs)
 
         setattr(wrapper, 'deprecation_reason', reason)

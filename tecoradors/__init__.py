@@ -11,7 +11,6 @@ __all__ = [
     "hashable",
     "dataclass",
     "Self",
-    "freeze",
     "final",
     "deprecated"
 ]
