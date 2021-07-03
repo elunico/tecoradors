@@ -1,11 +1,6 @@
-import dataclasses
-import enum
 import functools
 import inspect
-import time
-import types
 import typing
-import warnings
 
 
 # taken from https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3
@@ -100,6 +95,7 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
              given EXCEPT for 'self' and 'cls' first args
 
     """
+    import enum
 
     def check_accepts(f):
         vnames = f.__code__.co_varnames
@@ -148,6 +144,9 @@ def json_serializable(cls):
     Adds a 'to_json' method to instances the class that it annotates. This method
     uses json.dumps and a JSONEncoder to create a JSON string from the
     object's __dict__ attribute
+
+    Note that this decorator will return the original cls value passed into it. You will get the same object out that
+    gets put in, though, obviously, it will be mutated.
     """
     import json
 
@@ -191,6 +190,7 @@ def timed(fn):
     Returns the a tuple of original function result and the time elapsed in
     seconds
     """
+    import time
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
@@ -233,7 +233,7 @@ def squash(exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Excep
     (such as those derived from BaseException) will be re-raised and not squashed
     in the function
 
-    If squash is used with parameters, then: 
+    If squash is used with parameters, then:
 
     If an exception is raised in the function that is not of a type listed in
     the `exceptions` parameter, then the exception is raised normally
@@ -246,6 +246,8 @@ def squash(exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Excep
           result of calling `on_squashed` with the instance of the
           raised exception is returned
     """
+    import types
+
     if type(exceptions) is types.FunctionType:
         @functools.wraps(exceptions)
         def wrapper(*args, **kwargs):
@@ -281,6 +283,9 @@ def stringable(cls):
     """
     Adds a __str__ and __repr__ method to a class' instances that creates a human-readable JSON-style string
     out of the object's __dict__ attribute and includes the class name at the beginning
+
+    Note that this decorator will return the original cls value passed into it. You will get the same object out that
+    gets put in, though, obviously, it will be mutated.
     """
 
     def __str__(self):
@@ -303,6 +308,9 @@ def equatable(cls):
     NOTE: this method will also set __hash__ to None in accordance with the general Python langauge contract around
     implementing __eq__. See the hashable decorator if you need hashing
 
+    Note that this decorator will return the original cls value passed into it. You will get the same object out that
+    gets put in, though, obviously, it will be mutated.
+
     See Also: hashable
     """
 
@@ -321,6 +329,9 @@ def hashable(cls):
     """
     Implicitly calls 'equatable' for the class and also generates a __hash__
     method for the class so it can be used in a dictionary
+
+    Note that this decorator will return the original cls value passed into it. You will get the same object out that
+    gets put in, though, obviously, it will be mutated.
     """
     cls = equatable(cls)
 
@@ -347,15 +358,25 @@ def dataclass(cls, **kwargs):
     dataclasses.dataclass decorator. After that the stringable decorator is used
     to give the class a __str__ method
 
+    Note that this decorator will return the original cls value passed into it. You will get the same object out that
+    gets put in, though, obviously, it will be mutated.
+
     See Also: dataclasses.dataclass
     """
+    import dataclasses
+
     cls = dataclasses.dataclass(cls, **kwargs)
     cls = stringable(cls)
     return cls
 
 
 def final(cls):
-    """Prevents classes from being subclassed, by raising an Exception in __init_subclass__"""
+    """
+    Prevents classes from being subclassed, by raising an Exception in __init_subclass__
+
+    Note that this decorator will return the original cls value passed into it. You will get the same object out that
+    gets put in, though, obviously, it will be mutated.
+    """
 
     def error(*args, **kwargs):
         raise TypeError("Cannot inherit from final class {}".format(repr(cls.__name__)))
@@ -364,10 +385,76 @@ def final(cls):
     return cls
 
 
+class FrozenClassError(Exception):
+    """
+    Raised by the @frozen decorator if a class attribute is set or del'd after class initialization
+    """
+    pass
+
+
+def freeze(cls):
+    """
+    Makes a class frozen. All instances of Frozen classes are allowed to set attributes exactly once during __init__.
+    After that, attempting to mutate any attribute in the class will raise a TypeError. Additionally, the
+    __setitem__ method will raise a FrozenClassError if any attempt to call it is made outside of __init__.
+
+    It is recommended to combine this decorator with the @final decorator as well since subclasses can change the
+    behavior of the __setattr__ and __setitem__ methods. This could lead to a situation where some object isinstance
+    of a frozen class, but is not frozen
+
+    Finally it also changes __delattr__ so attributes cannot be unset
+
+    Note that this decorator will return the original cls value passed into it. You will get the same object out that
+    gets put in, though, obviously, it will be mutated.
+
+    Args:
+        cls: Class object to freeze
+
+    Returns: Class object that is now frozen. No subclassing or wrapping takes place
+
+    """
+
+    def create_frozen_method(method_name):
+        """
+        Returns a function that will raise an error when called on a class that is already initialized, otherwise
+        it will delegate to the appropriate super method defined by method_name
+        """
+        def error(self, *args, **kwargs):
+            if hasattr(self, '__gu__') and self.__gu__:
+                raise FrozenClassError("Class {!r} is frozen and cannot be "
+                                       "changed after instantiation".format(cls.__name__))
+            else:
+                getattr(super(cls, self), method_name)(*args, **kwargs)
+
+        return error
+
+    cls.__setattr__ = create_frozen_method('__setattr__')
+    cls.__delattr__ = create_frozen_method('__delattr__')
+    cls.__setitem__ = create_frozen_method('__setitem__')
+
+    # preserve cls's init but wrap it so that we can hook in and set a property indicated initialization happened
+    old_init = getattr(cls, '__init__')
+
+    def new_init(self, *args, **kwargs):
+        old_init(self, *args, **kwargs)
+        self.__gu__ = True
+
+    setattr(cls, '__init__', new_init)
+
+    return cls
+
+
 def deprecated(reason: str,
                replacement: str,
                starting_version: typing.Optional[str] = None,
                removed_version: typing.Optional[str] = None):
+    """
+    Marks a method or function as deprecated. Will print a DeprecationWarning
+    with reason and the given replacement. Replacement should be whatever
+    can be used to replace the deprecated method or function
+    """
+    import warnings
+
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
