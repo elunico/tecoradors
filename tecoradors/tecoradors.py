@@ -15,9 +15,7 @@ def _get_class_that_defined_method(meth):
                 return cls
         meth = getattr(meth, '__func__', meth)  # fallback to __qualname__ parsing
     if inspect.isfunction(meth):
-        cls = getattr(inspect.getmodule(meth),
-                      meth.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0],
-                      None)
+        cls = getattr(inspect.getmodule(meth), meth.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0], None)
         if isinstance(cls, type):
             return cls
     return getattr(meth, '__objclass__', None)  # handle special descriptor objects
@@ -97,11 +95,69 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
     """
     import enum
 
+    def check_self_or_cls(var_names):
+        # determine if the first arg is self or cls (we will not check this param)
+        return len(var_names) > 0 and (var_names[0] == 'self' or var_names[0] == 'cls')
+
     def check_accepts(f):
+        """
+        accepts a function and retruns a new function that has runtime type checks on all its parameters
+        Args:
+            f: a function for type checking
+
+        Returns: a new wrapped function with run time type checking
+        """
         vnames = f.__code__.co_varnames
         is_bound = check_self_or_cls(vnames)
-        argcount = f.__code__.co_argcount - (0 if not is_bound else 1)
+        argcount = f.__code__.co_argcount - (0 if not is_bound else 1)  # remove self or cls if present
         assert len(types) == argcount, f"Not enough types for arg count, expected {argcount} but got {len(types)}"
+
+        def _check_raw_type(a: typing.Any, t: typing.Union[type, tuple[type]]) -> None:
+            """
+            Determines if argument a is of type t. If t is iterable checks if a is of any of the types in t.
+            If t is Self or contains Self, there is a check to get the class that defined the method and determine
+            if that class is the type of a
+
+            Raises AssertionError if a is not of type t or of one of the types in t or Self holds
+
+            Args:
+                a: argument to check
+                t: type to check a is
+
+            Returns: None
+
+            """
+            # can pass in many types that are valid for a, but if Enum is passed in this breaks, so only iterate t
+            # if it not an enum otherwise treat it as a single class
+            if _isiterable(t) and not isinstance(t, enum.EnumMeta):
+                # if Self is given, check a against Self using _get_class_that_defined_method otherwise just check a
+                t = tuple([_get_class_that_defined_method(f) if i is Self else i for i in t])
+                assert all(i is not None for i in t), f"Cannot accept Self on non-bound method {f.__name__}"
+            else:
+                # if t is a single type check for Self and check for Self otherwise just check a against t
+                t = _get_class_that_defined_method(f) if t is Self else t
+                assert t is not None, f"Cannot accept Self on non-bound method {f.__name__}"
+            assert isinstance(a, t), f"{f.__name__}: got argument {a} (type of {type(a)}) " + \
+                                     f"but expected argument of type(s) {t}"
+
+        def _check_callable(a: typing.Any, predicate: typing.Callable[[type], bool]) -> None:
+            """
+            Instead of checking a directly against a type, t, this function can check a against a predicate.
+            t is a predicate which takes the argument a and determines if it is valid. t should raise an AssertionError
+            if it is invalid
+            Args:
+                a: argument to check
+                t: callable predicate to check a with
+
+            Returns: None
+
+            """
+            try:
+                assert predicate(a), f'function received {a} which did pass the type check {predicate}'
+            except AssertionError:
+                raise
+            except Exception as e:
+                raise AssertionError(f"Function could not validate parameter {a} with function {predicate}") from e
 
         @functools.wraps(f)
         def new_f(*args, **kwds):
@@ -113,28 +169,7 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
                     _check_raw_type(a, t)
             return f(*args, **kwds)
 
-        def _check_raw_type(a, t):
-            if _isiterable(t) and not isinstance(t, enum.EnumMeta):
-                t = tuple([_get_class_that_defined_method(f) if i is Self else i for i in t])
-                assert all(i is not None for i in t), f"Cannot accept Self on non-bound method {f.__name__}"
-            else:
-                t = _get_class_that_defined_method(f) if t is Self else t
-                assert t is not None, f"Cannot accept Self on non-bound method {f.__name__}"
-            assert isinstance(a, t), f"{f.__name__}: got argument {a} (type of {type(a)}) " + \
-                                     f"but expected argument of type(s) {t}"
-
-        def _check_callable(a, t):
-            try:
-                assert t(a), f'function received {a} which did pass the type check {t}'
-            except AssertionError:
-                raise
-            except Exception as e:
-                raise AssertionError(f"Function could not validate parameter {a} with function {t}") from e
-
         return new_f
-
-    def check_self_or_cls(var_names):
-        return len(var_names) > 0 and (var_names[0] == 'self' or var_names[0] == 'cls')
 
     return check_accepts
 
@@ -419,6 +454,7 @@ def freeze(cls):
         Returns a function that will raise an error when called on a class that is already initialized, otherwise
         it will delegate to the appropriate super method defined by method_name
         """
+
         def error(self, *args, **kwargs):
             if hasattr(self, '__gu__') and self.__gu__:
                 raise FrozenClassError("Class {!r} is frozen and cannot be "
@@ -444,9 +480,7 @@ def freeze(cls):
     return cls
 
 
-def deprecated(reason: str,
-               replacement: str,
-               starting_version: typing.Optional[str] = None,
+def deprecated(reason: str, replacement: str, starting_version: typing.Optional[str] = None,
                removed_version: typing.Optional[str] = None):
     """
     Marks a method or function as deprecated. Will print a DeprecationWarning
@@ -465,6 +499,109 @@ def deprecated(reason: str,
         setattr(wrapper, 'deprecation_reason', reason)
         setattr(wrapper, 'deprecation_starting_in', starting_version)
         setattr(wrapper, 'deprecation_remove_in', removed_version)
+        return wrapper
+
+    return decorator
+
+
+def log(destination: typing.IO, include_results: bool = False):
+    """
+    Logs calls to a function to a particular IO Stream (can be StringIO or a file). Always logs the function name and
+    the arguments and kwargs to a function. If an exception is raised when calling the function, the exception is
+    also logged. If the function completes successfully AND `include_results` is True, then the result of the
+    function call will also be logged.
+
+    Args:
+        destination: IO destination for log information
+        include_results: whether or not to include the result of the call in addition to the function name and
+        arguments
+
+    Returns: a log decorator
+
+    """
+    import sys
+
+    if callable(destination) and include_results is False:
+        return log(sys.stdout)(destination)
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            destination.write(f'Call to {fn.__name__!r} with arguments: args={args!r}, kwargs={kwargs!r}\n')
+            try:
+                result = fn(*args, **kwargs)
+            except Exception as e:
+                destination.write(f'Exception raised during function call: {e!r}')
+                raise
+            else:
+                if include_results:
+                    destination.write(f'|-- result={result!r}')
+
+            destination.write('\n')
+            return result
+
+        return wrapper
+
+    return decorator
+
+
+def synchronized(lock):
+    """
+    Synchronizes a function call access on the given lock object. `lock` must have an `acquire()` and a `release()`
+    method. Function call cannot proceed until the lock is acquired. Deadlocks are possible be careful
+    Args:
+        lock: the lock upon which to synchronize function call access
+
+    Returns: a decorator for wrapping a function
+
+    """
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            lock.aquire()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                lock.release()
+
+        return wrapper
+
+    return decorator
+
+
+def count_calls(with_args: bool = False, with_kwargs: bool = False):
+    """
+    Count the number of times a function is called, optionally keep track of how many times it is called with a specific
+    set of arguments or key-word arguments or both. Information can be retrieved using the `call_count()` method on the
+    function object which was decorated with this function
+
+    Args:
+        with_args: keep track of number of calls separately by argument
+        with_kwargs: keep track of number of calls separately by key-word argument
+
+    Returns: a decorator to track call counts
+
+    """
+    if callable(with_args) and with_kwargs is False:
+        return count_calls()(with_args)
+
+    from collections import Counter
+
+    def decorator(fn):
+        counts = Counter()
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            result = fn(*args, **kwargs)
+            key = (args if with_args else (args, str(kwargs))) if with_args or with_kwargs else fn
+            counts[key] += 1
+            return result
+
+        if not with_args:
+            setattr(wrapper, 'call_count', lambda *args, **kwargs: sum(counts.values()))
+        else:
+            setattr(wrapper, 'call_count', lambda *args, **kwargs: counts)
         return wrapper
 
     return decorator
