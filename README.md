@@ -19,7 +19,11 @@ Named based on my name which starts with a T.
   *  hashable
   *  dataclass
   *  final
+  *  freeze
   *  deprecated 
+  *  log
+  *  synchronized
+  *  count_calls
 
 ### Support from 
   *  Self (class)

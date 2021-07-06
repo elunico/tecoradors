@@ -1,3 +1,4 @@
+import enum
 import functools
 import inspect
 import typing
@@ -172,6 +173,65 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
         return new_f
 
     return check_accepts
+
+
+def returns(*types: typing.Union[type, typing.Tuple[type]]):
+    """
+    Run time assertions for the return type of a function. Use this decorator by annotating a function with @returns()
+    and the types that you expect the function to return. Some important notes about syntax:
+        1. If you provide 1, single type. There should be exactly 1 return type from the function. This can be any
+        type except for tuples. You may return one int, str, object, list, dict, etc.
+        2. You may provide a tuple of types as an argument to the function. This is like a Union type and allows many
+        values to type check successfully for a single return value.
+        3. You can pass several types to the *types splat (individually as varargs, not in a tuple). This has the effect
+        of type checking multiple return types. This is the reason, a simple tuple cannot be the only return type.
+        Tuple returns are type checked for all the elements in the tuple.
+
+        Note the subtle distinction between passing a tuple and passing varargs to the decorator.
+
+    Like with @accepts(), a method can have a @returns(Self) if it returns an instance of the class it is defined on
+
+    In any case, type check failure will occur at function call time with an AssertionError.
+
+    See Also:
+        accepts
+
+    Args:
+        *types: a splat of types or tuples of types that specify which types are acceptable return values for the
+        function
+
+    Returns:
+        a decorator to implement the runtime type-checking
+
+    """
+
+    def decorator(fn):
+        # noinspection PyTypeHints
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            nonlocal types
+            result = fn(*args, **kwargs)
+            types = tuple(_get_class_that_defined_method(fn) if i is Self else i for i in types)
+            assert all(i is not None for i in types), "Cannot have return type of Self on non-method object"
+            if isinstance(result, tuple):
+                if len(result) != len(types):
+                    raise AssertionError('Expected {} values returned but got {}'.format(len(types), len(result)))
+                for value, cls in zip(result, types):
+                    if _isiterable(cls) and not isinstance(cls, enum.EnumMeta):
+                        cls = tuple(_get_class_that_defined_method(fn) if i is Self else i for i in cls)
+                    assert isinstance(value, cls), 'Return type expected {} but ' \
+                                                   'received {} of type {}'.format(cls, value, type(value))
+            else:
+                t = types[0]
+                if _isiterable(t) and not isinstance(t, enum.EnumMeta):
+                    t = tuple(_get_class_that_defined_method(fn) if i is Self else i for i in t)
+                assert isinstance(result, t), 'Return type expected {} but ' \
+                                              'received {} of type {}'.format(t, result, type(result))
+            return result
+
+        return wrapper
+
+    return decorator
 
 
 def json_serializable(cls):
@@ -576,13 +636,20 @@ def count_calls(with_args: bool = False, with_kwargs: bool = False):
     set of arguments or key-word arguments or both. Information can be retrieved using the `call_count()` method on the
     function object which was decorated with this function. This decorator also attaches a `reset_call_count()` method
     to the function object which resets the call count to 0. args and kwargs can be passed to reset_call_count()
-    to reset count for that combination. Passing with no args will reset ALL counts
+    to reset count for that combination. Note that you cannot pass an arg or kwarg to `reset_call_count()`
+    unless you also passed True for with_args or with_kwargs, respectively. Calling with no arguments will ALWAYS reset
+    ALL counts 
 
     Args:
         with_args: keep track of number of calls separately by argument
         with_kwargs: keep track of number of calls separately by key-word argument
 
-    Returns: a decorator to track call counts
+    Returns:
+        a decorator to track call counts
+
+    Raises:
+        ValueError if `reset_call_count()` is passed args or kwargs, but with_args or with_kwargs, respectively,
+        are False
     """
     if callable(with_args) and with_kwargs is False:
         return count_calls()(with_args)
@@ -590,31 +657,47 @@ def count_calls(with_args: bool = False, with_kwargs: bool = False):
     from collections import Counter
 
     def decorator(fn):
+        def key(*args, **kwargs):
+            return (args if with_args else (args, str(kwargs))) if with_args or with_kwargs else fn
+
         counts = Counter()
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             result = fn(*args, **kwargs)
-            key = (args if with_args else (args, str(kwargs))) if with_args or with_kwargs else fn
-            counts[key] += 1
+            counts[key(*args, **kwargs)] += 1
             return result
 
         if not with_args:
-            setattr(wrapper, 'call_count', lambda *args, **kwargs: sum(counts.values()))
+            def call_count(*args, **kwargs):
+                check_args(*args, **kwargs)
+                return sum(counts.values())
+
+            setattr(wrapper, 'call_count', call_count)
         else:
-            setattr(wrapper, 'call_count', lambda *args, **kwargs: counts)
+            def call_count(*args, **kwargs):
+                check_args(*args, **kwargs)
+                if not args and not kwargs:
+                    return counts
+                return counts[key(*args, **kwargs)]
+
+            setattr(wrapper, 'call_count', call_count)
 
         def reset_count(*args, **kwargs):
             nonlocal counts
-            if args and not with_args:
-                raise ValueError("args passed to reset count, but with_args was not passed to count_calls()")
-            if kwargs and not with_kwargs:
-                raise ValueError("kwargs passed to reset count, but with_kwargs was not passed to count_calls()")
+            check_args(*args, **kwargs)
             if not args and not kwargs:
                 counts = Counter()
             else:
-                key = (args if with_args else (args, str(kwargs))) if with_args or with_kwargs else fn
-                counts[key] = 0
+                counts[key(*args, **kwargs)] = 0
+
+        def check_args(*args, **kwargs):
+            if args and not with_args:
+                raise ValueError("args passed to a count_calls() function, but with_args was not passed to "
+                                 "count_calls()")
+            if kwargs and not with_kwargs:
+                raise ValueError("kwargs passed to a count_calls() function, but with_kwargs was not passed to "
+                                 "count_calls()")
 
         setattr(wrapper, 'reset_call_count', reset_count)
         return wrapper
