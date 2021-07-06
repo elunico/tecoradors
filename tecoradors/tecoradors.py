@@ -559,7 +559,7 @@ def synchronized(lock):
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            lock.aquire()
+            lock.acquire()
             try:
                 return fn(*args, **kwargs)
             finally:
@@ -574,14 +574,15 @@ def count_calls(with_args: bool = False, with_kwargs: bool = False):
     """
     Count the number of times a function is called, optionally keep track of how many times it is called with a specific
     set of arguments or key-word arguments or both. Information can be retrieved using the `call_count()` method on the
-    function object which was decorated with this function
+    function object which was decorated with this function. This decorator also attaches a `reset_call_count()` method
+    to the function object which resets the call count to 0. args and kwargs can be passed to reset_call_count()
+    to reset count for that combination. Passing with no args will reset ALL counts
 
     Args:
         with_args: keep track of number of calls separately by argument
         with_kwargs: keep track of number of calls separately by key-word argument
 
     Returns: a decorator to track call counts
-
     """
     if callable(with_args) and with_kwargs is False:
         return count_calls()(with_args)
@@ -602,6 +603,20 @@ def count_calls(with_args: bool = False, with_kwargs: bool = False):
             setattr(wrapper, 'call_count', lambda *args, **kwargs: sum(counts.values()))
         else:
             setattr(wrapper, 'call_count', lambda *args, **kwargs: counts)
+
+        def reset_count(*args, **kwargs):
+            nonlocal counts
+            if args and not with_args:
+                raise ValueError("args passed to reset count, but with_args was not passed to count_calls()")
+            if kwargs and not with_kwargs:
+                raise ValueError("kwargs passed to reset count, but with_kwargs was not passed to count_calls()")
+            if not args and not kwargs:
+                counts = Counter()
+            else:
+                key = (args if with_args else (args, str(kwargs))) if with_args or with_kwargs else fn
+                counts[key] = 0
+
+        setattr(wrapper, 'reset_call_count', reset_count)
         return wrapper
 
     return decorator
