@@ -87,7 +87,10 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
     The parameters 'self' and 'cls' are NEVER CHECKED by this decorator if they appear as the first
     parameter in a method.
 
-    See Also: Self
+    NOTE: you must place the @accepts() decorator closer to the function than the @returns()
+
+
+    See Also: Self, @returns()
 
     :param types: a splat of types or tuples of types to be matched 1 to 1 against the types of the args to the function
     :return: a decorator which wraps a function and does a run time type check on all arguments against the types
@@ -108,6 +111,9 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
 
         Returns: a new wrapped function with run time type checking
         """
+        if hasattr(f, '_knows_returns') and f._knows_returns:
+            raise TypeError("You must decorate a function with accepts() before returns()")
+
         vnames = f.__code__.co_varnames
         is_bound = check_self_or_cls(vnames)
         argcount = f.__code__.co_argcount - (0 if not is_bound else 1)  # remove self or cls if present
@@ -193,8 +199,10 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
 
     In any case, type check failure will occur at function call time with an AssertionError.
 
+    NOTE: you must place the @accepts() decorator closer to the function than the @returns()
+
     See Also:
-        accepts
+        @accepts, Self
 
     Args:
         *types: a splat of types or tuples of types that specify which types are acceptable return values for the
@@ -229,6 +237,8 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
                                               'received {} of type {}'.format(t, result, type(result))
             return result
 
+        # used to check for the correct order of accepts and returns.
+        setattr(wrapper, '_knows_returns', True)
         return wrapper
 
     return decorator
