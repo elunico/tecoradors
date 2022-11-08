@@ -1,4 +1,5 @@
 venv
+.DS_Store
 .idea
 tecoradors_elunico.egg-info
 dist

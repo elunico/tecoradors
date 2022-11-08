@@ -246,6 +246,16 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
 
 
 def interruptable(fn):
+    """
+        a decorator that can be used to allow a function to seemlessly accept 
+        a KeyboardInterrupt. When a function is decorated with only 
+        @interruptable, then it will return None on KeyboardInterrupt but 
+        not propogate the exception
+        
+        If the function is decorated with @interruptable(string) then it will
+        print string and return None on KeyboardInterrupt and not propogate
+        the exception
+    """
     if callable(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
