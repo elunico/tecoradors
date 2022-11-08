@@ -24,6 +24,7 @@ Named based on my name which starts with a T.
   *  log
   *  synchronized
   *  count_calls
+  *  interruptable
 
 ### Support from 
   *  Self (class)

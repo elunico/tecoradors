@@ -11,7 +11,7 @@ echo
 if [[ "$REPLY" == 'y' ]]; then
   rm -rf dist &&
   python3 setup.py sdist bdist_wheel &&
-  twine upload dist/*
+  twine --repository tecoradors-elunico upload dist/*
 else
   echo 'Update the version number first'
   echo "Checking setup.py for version number"

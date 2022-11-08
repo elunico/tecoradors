@@ -2,6 +2,7 @@ import enum
 import functools
 import inspect
 import typing
+import sys
 
 
 # taken from https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3
@@ -244,6 +245,34 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
     return decorator
 
 
+def interruptable(fn):
+    if callable(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except KeyboardInterrupt as e:
+                return None
+
+        return wrapper
+
+    else:
+        if not isinstance(fn, str):
+            raise TypeError('@interruptable must be passed a function or a string as its argument')
+
+        def inner(func):
+            def wrapper(*args, **kwargs):
+                try:
+                    return func(*args, **kwargs)
+                except KeyboardInterrupt as e:
+                    print(fn, file=sys.stderr)
+                    return None
+
+            return wrapper
+
+        return inner
+
+
 def json_serializable(cls):
     """
     Adds a 'to_json' method to instances the class that it annotates. This method
@@ -354,33 +383,26 @@ def squash(exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Excep
     import types
 
     if type(exceptions) is types.FunctionType:
-        @functools.wraps(exceptions)
+        return squash()(exceptions)
+
+    def decor(fn):
+        @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             try:
-                return exceptions(*args, **kwargs)
-            except Exception:
-                return None
+                return fn(*args, **kwargs)
+            except BaseException as e:
+                if _isiterable(exceptions):
+                    squashed = tuple(exceptions)
+                else:
+                    squashed = exceptions,
+                if not isinstance(e, squashed):
+                    raise
+                else:
+                    return on_squashed(e) if hasattr(on_squashed, '__call__') else on_squashed
 
         return wrapper
-    else:
-        def decor(fn):
-            @functools.wraps(fn)
-            def wrapper(*args, **kwargs):
-                try:
-                    return fn(*args, **kwargs)
-                except BaseException as e:
-                    if _isiterable(exceptions):
-                        squashed = tuple(exceptions)
-                    else:
-                        squashed = exceptions,
-                    if not isinstance(e, squashed):
-                        raise
-                    else:
-                        return on_squashed(e) if hasattr(on_squashed, '__call__') else on_squashed
 
-            return wrapper
-
-        return decor
+    return decor
 
 
 # decorator function
