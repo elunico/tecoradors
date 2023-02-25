@@ -247,11 +247,11 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
 
 def interruptable(fn):
     """
-        a decorator that can be used to allow a function to seemlessly accept 
-        a KeyboardInterrupt. When a function is decorated with only 
-        @interruptable, then it will return None on KeyboardInterrupt but 
+        a decorator that can be used to allow a function to seemlessly accept
+        a KeyboardInterrupt. When a function is decorated with only
+        @interruptable, then it will return None on KeyboardInterrupt but
         not propogate the exception
-        
+
         If the function is decorated with @interruptable(string) then it will
         print string and return None on KeyboardInterrupt and not propogate
         the exception
@@ -291,7 +291,18 @@ def json_serializable(cls):
 
     Note that this decorator will return the original cls value passed into it. You will get the same object out that
     gets put in, though, obviously, it will be mutated.
+
+    >>> @json_serializable
+    ... class User:
+    ...     def __init__(self, name, views, liked_ids):
+    ...         self.name = name
+    ...         self.views = views
+    ...         self.liked_ids = liked_ids
+    >>> user1 = User("Alice", 2010, [13, 27, 201, 333])
+    >>> user1.to_json()
+    '{"name": "Alice", "views": 2010, "liked_ids": [13, 27, 201, 333]}'
     """
+
     import json
 
     class MyEncoder(json.JSONEncoder):
@@ -389,6 +400,22 @@ def squash(exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Excep
         If `on_squashed` is callable (has a __call__ method) then the
           result of calling `on_squashed` with the instance of the
           raised exception is returned
+
+    >>> @squash
+    ... def atoi(a):
+    ...     return int(a)
+    >>> atoi('5013')
+    5013
+    >>> atoi('hello') is None
+    True
+
+    >>> @squash(on_squashed=0)
+    ... def atoi(a):
+    ...     return int(a)
+    >>> atoi('37')
+    37
+    >>> atoi('4al')
+    0
     """
     import types
 
@@ -439,27 +466,68 @@ def stringable(cls):
 def equatable(cls):
     """
     Adds an __eq__ method that compares all the values in an object's __dict__ to all the values in another instance
-    of that object's dict. Note keys are NOT checked, however types are. Only *identical* types (not subclasses)
-    are accepted.
+    of that object's dict. Note keys are NOT checked, however types are. Note that subclasses are necessarily accepted
+    because of how the decorators work
 
-    NOTE: this method will also set __hash__ to None in accordance with the general Python langauge contract around
-    implementing __eq__. See the hashable decorator if you need hashing
+    NOTE: this method will return a *new subtype* of cls with en __eq__ defined. This will cause the type to be unhashable.
+    If you want property-wise equality with hashing, use the @hashable decorator. Because of the use of a decorator, the
+    original name of the class being decorated will become the subtype returned by these decorators. This allows the subtyping
+    to be mostly transparent, however, if you store a reference to the class and call the decorator manually, you can have access
+    to both instance. This is not recommended.
 
-    Note that this decorator will return the original cls value passed into it. You will get the same object out that
-    gets put in, though, obviously, it will be mutated.
+    Example:
+    ```
+    >>> class Thing:
+    ...     def __init__(self, a, b):
+    ...         self.a = a
+    ...         self.b = b
+    >>> EquatableThing = equatable(Thing)
+    >>> Thing != EquatableThing
+    True
+
+    >>> @equatable
+    ... class Person:
+    ...     def __init__(self, name, age):
+    ...         self.name = name
+    ...         self.age = age
+    >>> alice = Person("Alice", 23)
+    >>> bob = Person("Bob", 25)
+    >>> bob2 = Person("Bob", 25)
+    >>> other_bob = Person("Bob", 20)
+    >>> third_bob = Person("Bobbert", 25)
+    >>> alice != bob
+    True
+    >>> alice == bob
+    False
+    >>> bob == bob2
+    True
+    >>> bob != other_bob
+    True
+    >>> other_bob != third_bob
+    True
+    >>> third_bob != bob
+    True
+
+    ```
 
     See Also: hashable
     """
 
-    def __eq__(self, other):
-        if type(other) is not type(self):
-            return False
-        pairs = zip(self.__dict__.values(), other.__dict__.values())
-        return all([i[0] == i[1] for i in pairs])
+    def inherit(child):
+        return type(child.__name__, (cls, child), {})
 
-    setattr(cls, '__eq__', __eq__)
-    setattr(cls, '__hash__', None)
-    return cls
+    cls_str = '''
+    @inherit
+    class {cls}_equatable:
+        def __eq__(self, other):
+            if not isinstance(other, type(self)):
+                return NotImplemented
+            pairs = zip(self.__dict__.values(), other.__dict__.values())
+            return all([i[0] == i[1] for i in pairs])
+    '''.format(cls=cls.__name__).replace('\n    ', '\n')
+
+    exec(cls_str)
+    return locals()['{}_equatable'.format(cls.__name__)]
 
 
 def hashable(cls):
@@ -467,10 +535,38 @@ def hashable(cls):
     Implicitly calls 'equatable' for the class and also generates a __hash__
     method for the class so it can be used in a dictionary
 
-    Note that this decorator will return the original cls value passed into it. You will get the same object out that
-    gets put in, though, obviously, it will be mutated.
+    Note that this decorator will return a proxy class type for the cls class passed into it. Type
+    checks must assume @hashable classes are descedants of the class they decorated
+
+    >>> @hashable
+    ... class Person:
+    ...     def __init__(self, name, age):
+    ...         self.name = name
+    ...         self.age = age
+    >>> alice = Person("Alice", 23)
+    >>> bob = Person("Bob", 25)
+    >>> bob2 = Person("Bob", 25)
+    >>> other_bob = Person("Bob", 20)
+    >>> third_bob = Person("Bobbert", 25)
+    >>> (hash(alice) != hash(bob))
+    True
+    >>> (hash(alice) == hash(bob))
+    False
+    >>> (hash(bob) == hash(bob2))
+    True
+    >>> (hash(bob) != hash(other_bob))
+    True
+    >>> hash(other_bob) != hash(third_bob)
+    True
+    >>> hash(third_bob) != hash(bob)
+    True
     """
+
     cls = equatable(cls)
+
+    @squash((TypeError, AttributeError), on_squashed=0)
+    def super_hasher(cls, self):
+        return super(cls, self).__hash__()
 
     def hasher(a, i):
         return ((a << 8) | (a >> 56)) ^ hash(i)
@@ -481,7 +577,7 @@ def hashable(cls):
                 fmt_str = "value of type {} can't be hashed because the field {}={} (type={}) is not hashable"
                 str_format = fmt_str.format(repr(cls.__name__), repr(name), repr(value), repr(type(value).__name__))
                 raise TypeError(str_format)
-        return super(cls, self).__hash__() ^ functools.reduce(hasher, self.__dict__.values(), 0)
+        return super_hasher(cls, self) ^ functools.reduce(hasher, self.__dict__.values(), 0)
 
     setattr(cls, '__hash__', __hash__)
     return cls
@@ -501,7 +597,6 @@ def dataclass(cls, **kwargs):
     See Also: dataclasses.dataclass
     """
     import dataclasses
-
     cls = dataclasses.dataclass(cls, **kwargs)
     cls = stringable(cls)
     return cls
@@ -680,7 +775,7 @@ def count_calls(with_args: bool = False, with_kwargs: bool = False):
     to the function object which resets the call count to 0. args and kwargs can be passed to reset_call_count()
     to reset count for that combination. Note that you cannot pass an arg or kwarg to `reset_call_count()`
     unless you also passed True for with_args or with_kwargs, respectively. Calling with no arguments will ALWAYS reset
-    ALL counts 
+    ALL counts
 
     Args:
         with_args: keep track of number of calls separately by argument
