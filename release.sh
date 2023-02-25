@@ -1,6 +1,5 @@
 #!/usr/bin/env zsh
 
-
 python -m twine --version 1>/dev/null 2>&1 || python -m pip install twine
 python -m wheel version 1>/dev/null 2>&1 || python -m pip install wheel
 
@@ -10,8 +9,8 @@ echo
 
 if [[ "$REPLY" == 'y' ]]; then
   rm -rf dist &&
-  python3 setup.py sdist bdist_wheel &&
-  twine --repository tecoradors-elunico upload dist/*
+    python3 setup.py sdist bdist_wheel &&
+    twine upload dist/*
 else
   echo 'Update the version number first'
   echo "Checking setup.py for version number"
