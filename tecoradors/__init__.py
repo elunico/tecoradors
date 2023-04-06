@@ -1,6 +1,6 @@
 from tecoradors.tecoradors import (
     accepts, dataclass, deprecated, equatable, final, freeze, FrozenClassError, hashable, json_serializable, log, Self,
-    spread, squash, stringable, synchronized, timed, count_calls, returns, interruptable
+    spread, squash, stringable, synchronized, timed, count_calls, returns, interruptable, lazy
 )
 
 __all__ = [
@@ -22,5 +22,6 @@ __all__ = [
     "synchronized",
     "count_calls",
     "returns",
-    "interruptable"
+    "interruptable",
+    "lazy",
 ]

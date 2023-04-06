@@ -453,7 +453,7 @@ def stringable(cls):
     """
 
     def __str__(self):
-        items = ['{}={}'.format(k, repr(v)) for (k, v) in self.__dict__.items()]
+        items = ['{}={}'.format(k, repr(v)) for (k, v) in self.__dict__.items() if not k.startswith('__') and not k.endswith('__')]
         items_string = ', '.join(items)
         return '{}[{}]'.format(self.__class__.__name__, items_string)
 
@@ -518,7 +518,7 @@ def equatable(cls):
 
     cls_str = '''
     @inherit
-    class {cls}_equatable:
+    class {cls}:
         def __eq__(self, other):
             if not isinstance(other, type(self)):
                 return NotImplemented
@@ -527,7 +527,7 @@ def equatable(cls):
     '''.format(cls=cls.__name__).replace('\n    ', '\n')
 
     exec(cls_str)
-    return locals()['{}_equatable'.format(cls.__name__)]
+    return locals()['{}'.format(cls.__name__)]
 
 
 def hashable(cls):
@@ -840,3 +840,101 @@ def count_calls(with_args: bool = False, with_kwargs: bool = False):
         return wrapper
 
     return decorator
+
+
+T = typing.TypeVar('T')
+R = typing.TypeVar('R')
+
+
+class Descriptor(typing.Protocol):
+    def __get__(this, self: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> typing.Union[T, typing.Self]:
+        ...
+
+
+def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
+    '''
+    Similar to the `@property` decorator, lazy allows you to access the value computed by a method
+    call as if it were a simple attribute on an instance. The main difference between `@property`
+    and `@lazy` is that `@property` performs the computation on every attribute access, where as
+    `@lazy` performs the calculation once on the first access, and then overwrites the attribute
+    field with the value of the property upon its first computation. Subsequent accesses of the
+    property will only return the initial value that computed on the first access.
+
+    In this way, it creates a lazy attribute, storing the code to initialize the attribute
+    in a function, and only evaluating the function when accessed. It also elimited the overhead of
+    other similar solutions like `@functools.cache` by re-writing the attribute after first access,
+    removing the descriptor and obviating the need for an `if arg in cache` check
+    '''
+
+    class descriptor(Descriptor):
+        def __get__(self, receiver: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> typing.Union[T, typing.Self]:
+            if receiver is None:
+                return self
+            value = method(receiver, *args, **kwargs)
+            setattr(receiver, method.__name__, value)
+            return value
+
+    return descriptor()
+
+
+class PrecomputeStorage(enum.Enum):
+    EXCLUSIVE = 1
+    LIMITED = 2
+    PRESERVING = 3
+
+
+class NoSuchValue(ValueError):
+    pass
+
+
+def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStorage = PrecomputeStorage.PRESERVING, max: typing.Optional[int] = None):
+    """
+    Function decorator used to declaratively state precomputed values for a function
+
+    On defintion of a function decorated with precompute, the decorated function will be called once for each item
+    in argument_tuples. On each call, that item of argument_tuples is splatted into the function.
+
+    The decorator can also storage method as the storage parameter. This indicates how the decorated function
+    should behave regarding its values
+        EXCLUSIVE indicates the decorated function should only allow the precomputed values to be retrieved and raise an Exception otherwise
+        LIMITED indicates the decorated function will return pre-computed values and will perform computation for *every* call for a non precomputed value
+        PRESERVING indicates the decorated function will return pre-computed values where application, perform computations for non-precomputed values, and then store those results so no computation is done more than once, like @functools.lru_cache
+
+    The max argument works the same as maxsize for @functools.lru_cache and only makes sense when storage == PRESERVING
+    """
+    if storage != PrecomputeStorage.PRESERVING and max is not None:
+        raise ValueError("storage must be PRESERVING or max must be None")
+    if storage == PrecomputeStorage.PRESERVING:
+        def wrapper(fn):
+            @functools.lru_cache(maxsize=max)
+            def decorator(*args):
+                return fn(*args)
+            for args in argument_tuples:
+                decorator(*args)  # cached by functools
+            return decorator
+        return wrapper
+    elif storage == PrecomputeStorage.LIMITED:
+        def wrapper(fn):
+            cache = {}
+            for args in argument_tuples:
+                cache[args] = fn(*args)
+
+            def decorator(*args):
+                if args in cache:
+                    return cache[args]
+                else:
+                    return fn(*args)
+            return decorator
+        return wrapper
+    else:
+        def wrapper(fn):
+            cache = {}
+            for args in argument_tuples:
+                cache[args] = fn(*args)
+
+            def decorator(*args):
+                if args not in cache:
+                    raise NoSuchValue('{} was not precomputed for the given function'.format(args))
+                return cache[args]
+            return decorator
+        return wrapper

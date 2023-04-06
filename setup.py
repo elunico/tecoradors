@@ -5,13 +5,13 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="tecoradors-elunico",
-    version="5.0.0",
+    version="5.1.0",
     author="Thomas Povinelli",
     author_email="tompov227@gmail.com",
     description="A small collection of decorators I like to use often",
     long_description=long_description,
     long_description_content_type="text/markdown",
-include_package_data=True,
+    include_package_data=True,
     url="https://github.com/elunico/tecoradors",
     classifiers=[
         "Programming Language :: Python :: 3",

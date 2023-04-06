@@ -6,9 +6,9 @@ Python decorators that I like to use a lot.
 
 [Find the pypi package here](https://pypi.org/project/tecoradors-elunico/)
 
-Named based on my name which starts with a T.
+Named based on my name which starts with a T. You can find more information reading the docstrings of the functions
 
-### Decorators are 
+### Decorators are
   *  accepts
   *  json_serializable
   *  spread
@@ -20,11 +20,15 @@ Named based on my name which starts with a T.
   *  dataclass
   *  final
   *  freeze
-  *  deprecated 
+  *  deprecated
   *  log
   *  synchronized
   *  count_calls
   *  interruptable
+  *  lazy
+  *  precompute
 
-### Support from 
-  *  Self (class)
+### Support from types
+  *  Self
+  *  PrecomputeStorage
+  *  NoSuchValue
