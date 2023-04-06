@@ -1,8 +1,9 @@
 import typing
+from tecoradors import precompute, PrecomputeStorage
 from math import sin as _sin, radians
 
-with open('./tecoradors/tecoradors.py', 'r') as f:
-    exec(f.read())
+# with open('./tecoradors/tecoradors.py', 'r') as f:
+# exec(f.read())
 
 
 @precompute([(radians(i), ) for i in range(360)], storage=PrecomputeStorage.EXCLUSIVE)
