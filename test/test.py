@@ -6,7 +6,7 @@ from math import sin as _sin, radians
 # exec(f.read())
 
 
-@precompute([(radians(i), ) for i in range(360)], storage=PrecomputeStorage.EXCLUSIVE)
+@precompute([(radians(i), ) for i in range(360)], storage=PrecomputeStorage.PRESERVING)
 def sin(x):
     print('computing', x)
     return _sin(x)

@@ -11,6 +11,8 @@ Named based on my name which starts with a T. You can find more information read
 ### Decorators are
   *  accepts
   *  json_serializable
+  *  builder
+  *  tattle
   *  spread
   *  timed
   *  squash
@@ -32,3 +34,4 @@ Named based on my name which starts with a T. You can find more information read
   *  Self
   *  PrecomputeStorage
   *  NoSuchValue
+  *  TattleOptions

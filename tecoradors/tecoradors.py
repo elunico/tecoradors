@@ -1,8 +1,8 @@
 import enum
 import functools
 import inspect
-import typing
 import sys
+import typing
 
 
 # taken from https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3
@@ -338,6 +338,132 @@ def spread(times):
     return inner
 
 
+def builder(typechecking=True):
+    """
+    The builder decorator allows you to create builder classes based on the desired attributes and optionally types.
+
+    You can define a class with attributes and types and decorate with the builder decorator and you will get
+        -  An __init__ that takes no arguments and initializes all fields to None
+        -  A setX method for every attribute defined in the class which sets the corresponding field and returns self
+
+    If you decorate a class @builder you get type checking by default. This is equivalent to @builder(True) and if you
+    want to turn off type checking you can use @builder(False) or @builder(typechecking=False)
+
+    An example of how to use it
+
+    >>> @builder
+    >>> class HTTPServerOptions:
+    >>>     ip: str
+    >>>     port: int
+    >>>     username: str
+
+    This would generate the equivalent of
+
+    >>> class HTTPServerOptions:
+    >>>     def __init__(self):
+    >>>         self.ip = None
+    >>>         self.port = None
+    >>>         self.username = None
+    >>>
+    >>>     def setip(self, value):
+    >>>         if not isinstance(value, str):
+    >>>             raise TypeError("Excepted attribute ip of type {} but got type {}".format(str, type(value)))
+    >>>         self.ip = value
+    >>>         return self
+    >>>
+    >>>     def setport(self, value):
+    >>>         if not isinstance(value, int):
+    >>>             raise TypeError("Excepted attribute port of type {} but got type {}".format(int, type(value)))
+    >>>         self.port = value
+    >>>         return self
+    >>>
+    >>>     def setusername(self, value):
+    >>>         if not isinstance(value, str):
+    >>>             raise TypeError("Excepted attribute username of type {} but got type {}".format(str, type(value)))
+    >>>         self.username = value
+    >>>         return self
+    """
+    def builder_interior(cls):
+        attributes = cls.__annotations__
+
+        def cls_init(self):
+            for (attr, typename) in attributes.items():
+                setattr(self, attr, None)
+
+        def setter_maker(attr):
+            def setter(self, value):
+                if typechecking and not isinstance(value, typename):
+                    raise TypeError(
+                        "Excepted attribute {} of type {} but got type {}".format(attr, typename, type(value)))
+                setattr(self, attr, value)
+                return self
+
+            return setter
+
+        for (attr, typename) in attributes.items():
+            setattr(cls, 'set{}'.format(attr), setter_maker(attr))
+
+        setattr(cls, '__init__', cls_init)
+        return cls
+
+    if callable(typechecking):
+        return builder_interior(typechecking)
+    else:
+        return builder_interior
+
+
+@builder
+class TattleOptions:
+    """
+    Determines what happens when a function is decorated with @tattle. See there for more. See also @builder for
+    how to construct a TattleOptions
+
+    Each option can either be None or a Callable.
+
+    The onenter property is called before calling the function and it is passed a *args **kwargs splat equivalent
+    to what will be passed into the function when it is called. This is never used if onexit is None
+
+    The onexit property is called after the function returns and it is passed (result, *args, **kwargs) that is the
+    result of the function call and the same args, kwargs splat that went into the function. This is never used if
+    onexit is None *or* if an exception occurs before the function returns
+
+    The onexception property is only called if an exception is raised. The callable is passed (exception, *args, **kwargs)
+    where exception is the instance of the caught exception and *args, and **kwargs are the splat arguments passed to
+    the function when it was called. This is never used if onexception is None or if the function returns normally
+    without raising an Exception.
+    """
+    onenter: typing.Callable
+    onexit: typing.Callable
+    onexception: typing.Callable
+
+
+def tattle(options: typing.Union[TattleOptions, typing.Callable]):
+    """
+    Function decorator that allows the reporting of events. A function decorated with @tattle
+    can have the entrance, exit, and exceptions of the function reported. The `options` parameter is a TattleOptions
+    instance that can is given callables for `onenter`, `onexit`, and `onexception`. These callables are called
+    with arguments at the appropriate time. These options can also be None and no action on that event will be taken
+    """
+    def interior(fn):
+        def wrapper(*args, **kwargs):
+            if options.onenter is not None:
+                options.onenter(*args, **kwargs)
+            try:
+                result = fn(*args, **kwargs)
+            except Exception as exception:
+                if options.onexception is not None:
+                    options.onexception(exception, *args, **kwargs)
+                else:
+                    raise
+            else:
+                if options.onexit is not None:
+                    options.onexit(result, *args, **kwargs)
+                return result
+        return wrapper
+    return interior
+
+
+
 def timed(fn):
     """
     Wraps a function using time.time() in order to time the execution of the function
@@ -453,7 +579,8 @@ def stringable(cls):
     """
 
     def __str__(self):
-        items = ['{}={}'.format(k, repr(v)) for (k, v) in self.__dict__.items() if not k.startswith('__') and not k.endswith('__')]
+        items = ['{}={}'.format(k, repr(v)) for (k, v) in self.__dict__.items() if
+                 not k.startswith('__') and not k.endswith('__')]
         items_string = ', '.join(items)
         return '{}[{}]'.format(self.__class__.__name__, items_string)
 
@@ -847,7 +974,8 @@ R = typing.TypeVar('R')
 
 
 class Descriptor(typing.Protocol):
-    def __get__(this, self: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> typing.Union[T, typing.Self]:
+    def __get__(this, self: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> \
+    typing.Union[T, typing.Self]:
         ...
 
 
@@ -867,7 +995,8 @@ def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
     '''
 
     class descriptor(Descriptor):
-        def __get__(self, receiver: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> typing.Union[T, typing.Self]:
+        def __get__(self, receiver: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> \
+        typing.Union[T, typing.Self]:
             if receiver is None:
                 return self
             value = method(receiver, *args, **kwargs)
@@ -887,7 +1016,8 @@ class NoSuchValue(ValueError):
     pass
 
 
-def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStorage = PrecomputeStorage.PRESERVING, max: typing.Optional[int] = None):
+def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStorage = PrecomputeStorage.PRESERVING,
+               max: typing.Optional[int] = None):
     """
     Function decorator used to declaratively state precomputed values for a function
 
@@ -909,9 +1039,11 @@ def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStora
             @functools.lru_cache(maxsize=max)
             def decorator(*args):
                 return fn(*args)
+
             for args in argument_tuples:
                 decorator(*args)  # cached by functools
             return decorator
+
         return wrapper
     elif storage == PrecomputeStorage.LIMITED:
         def wrapper(fn):
@@ -924,7 +1056,9 @@ def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStora
                     return cache[args]
                 else:
                     return fn(*args)
+
             return decorator
+
         return wrapper
     else:
         def wrapper(fn):
@@ -936,5 +1070,7 @@ def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStora
                 if args not in cache:
                     raise NoSuchValue('{} was not precomputed for the given function'.format(args))
                 return cache[args]
+
             return decorator
+
         return wrapper
