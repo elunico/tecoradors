@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="tecoradors-elunico",
-    version="5.2.1",
+    version="5.2.2",
     author="Thomas Povinelli",
     author_email="tompov227@gmail.com",
     description="A small collection of decorators I like to use often",
