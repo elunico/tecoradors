@@ -5,14 +5,25 @@ import sys
 import typing
 
 
+def chained(obj, *fields):
+    for field in fields:
+        obj = getattr(obj, field)
+    return obj
+
+
+def apply(fns, *arguments, **kwarguments):
+    return tuple(fn(*arguments, **kwarguments) for fn in fns)
+
 # taken from https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3
+
+
 def _get_class_that_defined_method(meth):
     if isinstance(meth, functools.partial):
         return _get_class_that_defined_method(meth.func)
     if inspect.ismethod(meth) or (
             inspect.isbuiltin(meth) and getattr(meth, '__self__', None) is not None and getattr(meth.__self__,
                                                                                                 '__class__', None)):
-        for cls in inspect.getmro(meth.__self__.__class__):
+        for cls in meth.__self__.__class__.__mro__:
             if meth.__name__ in cls.__dict__:
                 return cls
         meth = getattr(meth, '__func__', meth)  # fallback to __qualname__ parsing
@@ -463,7 +474,6 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
     return interior
 
 
-
 def timed(fn):
     """
     Wraps a function using time.time() in order to time the execution of the function
@@ -710,7 +720,21 @@ def hashable(cls):
     return cls
 
 
+def orderable(cls):
+    """
+    Modifies a class to be orderable. Provides a __eq__ and __hash__ method using @hashable.
+    Requires an implementation of one of the 6 magic comparison methods.
+    Uses @functools.total_ordering to accomplish the ordering.
+
+    See the descriptions of @hashable and @functools.total_ordering for the
+    caveats around using this decorator
+    """
+    cls = hashable(cls)
+    return functools.total_ordering(cls)
+
 # decorator function
+
+
 def dataclass(cls, **kwargs):
     """
     Wraps the built-in dataclass.dataclass annotation in order to also give the
@@ -975,7 +999,7 @@ R = typing.TypeVar('R')
 
 class Descriptor(typing.Protocol):
     def __get__(this, self: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> \
-    typing.Union[T, typing.Self]:
+            typing.Union[T, typing.Self]:
         ...
 
 
@@ -996,7 +1020,7 @@ def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
 
     class descriptor(Descriptor):
         def __get__(self, receiver: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> \
-        typing.Union[T, typing.Self]:
+                typing.Union[T, typing.Self]:
             if receiver is None:
                 return self
             value = method(receiver, *args, **kwargs)
