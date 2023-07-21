@@ -19,6 +19,7 @@ Named based on my name which starts with a T. You can find more information read
   *  stringable
   *  equatable
   *  hashable
+  *  orderable
   *  dataclass
   *  final
   *  freeze
