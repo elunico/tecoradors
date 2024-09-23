@@ -14,6 +14,7 @@ def chained(obj, *fields):
 def apply(fns, *arguments, **kwarguments):
     return tuple(fn(*arguments, **kwarguments) for fn in fns)
 
+
 # taken from https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3
 
 
@@ -394,6 +395,7 @@ def builder(typechecking=True):
     >>>         self.username = value
     >>>         return self
     """
+
     def builder_interior(cls):
         attributes = cls.__annotations__
 
@@ -403,7 +405,7 @@ def builder(typechecking=True):
 
         def setter_maker(attr):
             def setter(self, value):
-                if typechecking and not isinstance(value, typename):
+                if typechecking and not isinstance(value, attributes[attr]):
                     raise TypeError(
                         "Excepted attribute {} of type {} but got type {}".format(attr, typename, type(value)))
                 setattr(self, attr, value)
@@ -455,7 +457,22 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
     instance that can is given callables for `onenter`, `onexit`, and `onexception`. These callables are called
     with arguments at the appropriate time. These options can also be None and no action on that event will be taken
     """
+    if callable(options):
+        @functools.wraps(options)
+        def wrapper(*args, **kwargs):
+            print("Call start: {}({}, {})".format(options.__name__, args, kwargs))
+            try:
+                result = options(*args, **kwargs)
+            except Exception as e:
+                print("Call exception [{}]: {}({}, {})".format(e, options.__name__, args, kwargs))
+            else:
+                print("Call finished: {}({}, {})".format(options.__name__, args, kwargs))
+                return result
+
+        return wrapper
+
     def interior(fn):
+        @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             if options.onenter is not None:
                 options.onenter(*args, **kwargs)
@@ -470,7 +487,9 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
                 if options.onexit is not None:
                     options.onexit(result, *args, **kwargs)
                 return result
+
         return wrapper
+
     return interior
 
 
@@ -731,6 +750,7 @@ def orderable(cls):
     """
     cls = hashable(cls)
     return functools.total_ordering(cls)
+
 
 # decorator function
 
