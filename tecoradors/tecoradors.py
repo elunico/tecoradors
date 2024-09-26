@@ -15,10 +15,8 @@ def apply(fns, *arguments, **kwarguments):
     return tuple(fn(*arguments, **kwarguments) for fn in fns)
 
 
-# taken from https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3
-
-
-def _get_class_that_defined_method(meth):
+def _get_class_that_defined_method(meth: typing.Callable) -> typing.Optional[type]:
+    # taken from https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3
     if isinstance(meth, functools.partial):
         return _get_class_that_defined_method(meth.func)
     if inspect.ismethod(meth) or (
@@ -27,12 +25,15 @@ def _get_class_that_defined_method(meth):
         for cls in meth.__self__.__class__.__mro__:
             if meth.__name__ in cls.__dict__:
                 return cls
-        meth = getattr(meth, '__func__', meth)  # fallback to __qualname__ parsing
+        # fallback to __qualname__ parsing
+        meth = getattr(meth, '__func__', meth)
     if inspect.isfunction(meth):
-        cls = getattr(inspect.getmodule(meth), meth.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0], None)
+        cls = getattr(inspect.getmodule(meth), meth.__qualname__.split(
+            '.<locals>', 1)[0].rsplit('.', 1)[0], None)
         if isinstance(cls, type):
             return cls
-    return getattr(meth, '__objclass__', None)  # handle special descriptor objects
+    # handle special descriptor objects
+    return getattr(meth, '__objclass__', None)
 
 
 class Self(type):
@@ -125,12 +126,15 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
         Returns: a new wrapped function with run time type checking
         """
         if hasattr(f, '_knows_returns') and f._knows_returns:
-            raise TypeError("You must decorate a function with accepts() before returns()")
+            raise TypeError(
+                "You must decorate a function with accepts() before returns()")
 
         vnames = f.__code__.co_varnames
         is_bound = check_self_or_cls(vnames)
-        argcount = f.__code__.co_argcount - (0 if not is_bound else 1)  # remove self or cls if present
-        assert len(types) == argcount, f"Not enough types for arg count, expected {argcount} but got {len(types)}"
+        argcount = f.__code__.co_argcount - \
+            (0 if not is_bound else 1)  # remove self or cls if present
+        assert len(types) == argcount, f"Not enough types for arg count, expected {
+            argcount} but got {len(types)}"
 
         def _check_raw_type(a: typing.Any, t: typing.Union[type, tuple[type]]) -> None:
             """
@@ -151,14 +155,17 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
             # if it not an enum otherwise treat it as a single class
             if _isiterable(t) and not isinstance(t, enum.EnumMeta):
                 # if Self is given, check a against Self using _get_class_that_defined_method otherwise just check a
-                t = tuple([_get_class_that_defined_method(f) if i is Self else i for i in t])
-                assert all(i is not None for i in t), f"Cannot accept Self on non-bound method {f.__name__}"
+                t = tuple([_get_class_that_defined_method(f)
+                          if i is Self else i for i in t])
+                assert all(
+                    i is not None for i in t), f"Cannot accept Self on non-bound method {f.__name__}"
             else:
                 # if t is a single type check for Self and check for Self otherwise just check a against t
                 t = _get_class_that_defined_method(f) if t is Self else t
-                assert t is not None, f"Cannot accept Self on non-bound method {f.__name__}"
+                assert t is not None, f"Cannot accept Self on non-bound method {
+                    f.__name__}"
             assert isinstance(a, t), f"{f.__name__}: got argument {a} (type of {type(a)}) " + \
-                                     f"but expected argument of type(s) {t}"
+                f"but expected argument of type(s) {t}"
 
         def _check_callable(a: typing.Any, predicate: typing.Callable[[type], bool]) -> None:
             """
@@ -173,11 +180,13 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
 
             """
             try:
-                assert predicate(a), f'function received {a} which did pass the type check {predicate}'
+                assert predicate(a), f'function received {
+                    a} which did pass the type check {predicate}'
             except AssertionError:
                 raise
             except Exception as e:
-                raise AssertionError(f"Function could not validate parameter {a} with function {predicate}") from e
+                raise AssertionError(f"Function could not validate parameter {
+                                     a} with function {predicate}") from e
 
         @functools.wraps(f)
         def new_f(*args, **kwds):
@@ -232,22 +241,29 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
         def wrapper(*args, **kwargs):
             nonlocal types
             result = fn(*args, **kwargs)
-            types = tuple(_get_class_that_defined_method(fn) if i is Self else i for i in types)
-            assert all(i is not None for i in types), "Cannot have return type of Self on non-method object"
+            types = tuple(_get_class_that_defined_method(fn)
+                          if i is Self else i for i in types)
+            assert all(
+                i is not None for i in types), "Cannot have return type of Self on non-method object"
             if isinstance(result, tuple):
                 if len(result) != len(types):
-                    raise AssertionError('Expected {} values returned but got {}'.format(len(types), len(result)))
+                    raise AssertionError(
+                        'Expected {} values returned but got {}'.format(len(types), len(result)))
                 for value, cls in zip(result, types):
                     if _isiterable(cls) and not isinstance(cls, enum.EnumMeta):
-                        cls = tuple(_get_class_that_defined_method(fn) if i is Self else i for i in cls)
+                        cls = tuple(_get_class_that_defined_method(
+                            fn) if i is Self else i for i in cls)
                     assert isinstance(value, cls), 'Return type expected {} but ' \
-                                                   'received {} of type {}'.format(cls, value, type(value))
+                                                   'received {} of type {}'.format(
+                                                       cls, value, type(value))
             else:
                 t = types[0]
                 if _isiterable(t) and not isinstance(t, enum.EnumMeta):
-                    t = tuple(_get_class_that_defined_method(fn) if i is Self else i for i in t)
+                    t = tuple(_get_class_that_defined_method(
+                        fn) if i is Self else i for i in t)
                 assert isinstance(result, t), 'Return type expected {} but ' \
-                                              'received {} of type {}'.format(t, result, type(result))
+                                              'received {} of type {}'.format(
+                                                  t, result, type(result))
             return result
 
         # used to check for the correct order of accepts and returns.
@@ -257,7 +273,7 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
     return decorator
 
 
-def interruptable(fn):
+def interruptable(fn: typing.Union[typing.Callable, str]):
     """
         a decorator that can be used to allow a function to seemlessly accept
         a KeyboardInterrupt. When a function is decorated with only
@@ -280,7 +296,8 @@ def interruptable(fn):
 
     else:
         if not isinstance(fn, str):
-            raise TypeError('@interruptable must be passed a function or a string as its argument')
+            raise TypeError(
+                '@interruptable must be passed a function or a string as its argument')
 
         def inner(func):
             def wrapper(*args, **kwargs):
@@ -295,7 +312,7 @@ def interruptable(fn):
         return inner
 
 
-def json_serializable(cls):
+def json_serializable(cls: typing.Type):
     """
     Adds a 'to_json' method to instances the class that it annotates. This method
     uses json.dumps and a JSONEncoder to create a JSON string from the
@@ -328,7 +345,7 @@ def json_serializable(cls):
     return cls
 
 
-def spread(times):
+def spread(times: int):
     """
     creates a new function that takes the same arguments as the original function
     and runs the original function `times` times storing the result in a list
@@ -350,7 +367,33 @@ def spread(times):
     return inner
 
 
-def builder(typechecking=True):
+class PredicateType:
+    '''
+    A PredicateType is subclassed as a means to provide custom type checking. A PredicateType is used for value checking
+    and not instance checking. A TypeError will be raised if the value does not satisfy the predicate. 
+
+    Subclasses of PredicateType are used for attribute type checking in classes decorated with @builder. 
+    When an annotation is a subclass of PredicateType, the builder will use the PredicateType.check method to check
+    if the value satisfies the predicate. Otherwise, instance checking will be used, which means that the value must be of
+    an instance of the type specified by the annotation. 
+
+    To use this class you must subclass and override the isacceptable method to provide the custom type checking logic.
+    The isacceptable method should return True if the value satisfies the predicate and False otherwise. 
+    The isacceptable method should be a class method.
+    '''
+
+    @classmethod
+    def check(cls, attr: str, value: typing.Any):
+        if not cls.isacceptable(value):
+            raise TypeError(f"Excepted attribute '{attr}' to satisfy predicate {
+                            cls} but got {value}")
+
+    @classmethod
+    def isacceptable(cls, value: typing.Any) -> bool:
+        raise NotImplementedError("Subclass must implement abstract method")
+
+
+def builder(typechecking: bool = True):
     """
     The builder decorator allows you to create builder classes based on the desired attributes and optionally types.
 
@@ -394,6 +437,23 @@ def builder(typechecking=True):
     >>>             raise TypeError("Excepted attribute username of type {} but got type {}".format(str, type(value)))
     >>>         self.username = value
     >>>         return self
+
+    You may also annotate the attributes with a subclass of PredicateType  to customize the type checking. 
+    For example, if you want to make sure that the ip address is a valid ip address you can do the following:
+
+    >>> class IPAddressPredicate(PredicateType):
+    >>>     @classmethod
+    >>>     def isacceptable(self, value: str) -> bool:
+    >>>         return re.match(r"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$", value) is not None
+
+    >>> @builder
+    >>> class HTTPServerOptions:
+    >>>     ip: IPAddressPredicate
+    >>>     port: int
+    >>>     username: str
+
+    Only subclasses of PredicateType can be used to do this predicate-based checking. Any other type will be 
+    used for isinistance checking. 
     """
 
     def builder_interior(cls):
@@ -405,9 +465,12 @@ def builder(typechecking=True):
 
         def setter_maker(attr):
             def setter(self, value):
-                if typechecking and not isinstance(value, attributes[attr]):
-                    raise TypeError(
-                        "Excepted attribute {} of type {} but got type {}".format(attr, typename, type(value)))
+                if typechecking:
+                    if issubclass(attributes[attr], PredicateType):
+                        attributes[attr].check(attr, value)
+                    elif not isinstance(value, attributes[attr]):
+                        raise TypeError(
+                            "Excepted attribute {} of type {} but got type {}".format(attr, typename, type(value)))
                 setattr(self, attr, value)
                 return self
 
@@ -460,13 +523,16 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
     if callable(options):
         @functools.wraps(options)
         def wrapper(*args, **kwargs):
-            print("Call start: {}({}, {})".format(options.__name__, args, kwargs))
+            print("Call start: {}({}, {})".format(
+                options.__name__, args, kwargs))
             try:
                 result = options(*args, **kwargs)
             except Exception as e:
-                print("Call exception [{}]: {}({}, {})".format(e, options.__name__, args, kwargs))
+                print("Call exception [{}]: {}({}, {})".format(
+                    e, options.__name__, args, kwargs))
             else:
-                print("Call finished: {}({}, {})".format(options.__name__, args, kwargs))
+                print("Call finished: {}({}, {})".format(
+                    options.__name__, args, kwargs))
                 return result
 
         return wrapper
@@ -619,71 +685,95 @@ def stringable(cls):
     return cls
 
 
+# def equatable(cls):
+#     """
+#     Adds an __eq__ method that compares all the values in an object's __dict__ to all the values in another instance
+#     of that object's dict. Note keys are NOT checked, however types are. Note that subclasses are necessarily accepted
+#     because of how the decorators work
+
+#     NOTE: this method will return a *new subtype* of cls with en __eq__ defined. This will cause the type to be unhashable.
+#     If you want property-wise equality with hashing, use the @hashable decorator. Because of the use of a decorator, the
+#     original name of the class being decorated will become the subtype returned by these decorators. This allows the subtyping
+#     to be mostly transparent, however, if you store a reference to the class and call the decorator manually, you can have access
+#     to both instance. This is not recommended.
+
+#     Example:
+#     ```
+#     >>> class Thing:
+#     ...     def __init__(self, a, b):
+#     ...         self.a = a
+#     ...         self.b = b
+#     >>> EquatableThing = equatable(Thing)
+#     >>> Thing != EquatableThing
+#     True
+
+#     >>> @equatable
+#     ... class Person:
+#     ...     def __init__(self, name, age):
+#     ...         self.name = name
+#     ...         self.age = age
+#     >>> alice = Person("Alice", 23)
+#     >>> bob = Person("Bob", 25)
+#     >>> bob2 = Person("Bob", 25)
+#     >>> other_bob = Person("Bob", 20)
+#     >>> third_bob = Person("Bobbert", 25)
+#     >>> alice != bob
+#     True
+#     >>> alice == bob
+#     False
+#     >>> bob == bob2
+#     True
+#     >>> bob != other_bob
+#     True
+#     >>> other_bob != third_bob
+#     True
+#     >>> third_bob != bob
+#     True
+
+#     ```
+
+#     See Also: hashable
+#     """
+
+#     def inherit(child):
+#         return type(child.__name__, (cls, child), {})
+
+#     cls_str = '''
+#     @inherit
+#     class {cls}:
+#         def __eq__(self, other):
+#             if not isinstance(other, type(self)):
+#                 return NotImplemented
+#             pairs = zip(self.__dict__.values(), other.__dict__.values())
+#             return all([i[0] == i[1] for i in pairs])
+#     '''.format(cls=cls.__name__).replace('\n    ', '\n')
+
+#     exec(cls_str)
+#     return locals()['{}'.format(cls.__name__)]
+
+
 def equatable(cls):
     """
     Adds an __eq__ method that compares all the values in an object's __dict__ to all the values in another instance
-    of that object's dict. Note keys are NOT checked, however types are. Note that subclasses are necessarily accepted
+    of that object's dict. Note keys are NOT checked, however types are. Note that if the class has a __slots__ attribute,
+    then the values in the __slots__ are compared. 
+    Note that subclasses are necessarily accepted
     because of how the decorators work
-
-    NOTE: this method will return a *new subtype* of cls with en __eq__ defined. This will cause the type to be unhashable.
-    If you want property-wise equality with hashing, use the @hashable decorator. Because of the use of a decorator, the
-    original name of the class being decorated will become the subtype returned by these decorators. This allows the subtyping
-    to be mostly transparent, however, if you store a reference to the class and call the decorator manually, you can have access
-    to both instance. This is not recommended.
-
-    Example:
-    ```
-    >>> class Thing:
-    ...     def __init__(self, a, b):
-    ...         self.a = a
-    ...         self.b = b
-    >>> EquatableThing = equatable(Thing)
-    >>> Thing != EquatableThing
-    True
-
-    >>> @equatable
-    ... class Person:
-    ...     def __init__(self, name, age):
-    ...         self.name = name
-    ...         self.age = age
-    >>> alice = Person("Alice", 23)
-    >>> bob = Person("Bob", 25)
-    >>> bob2 = Person("Bob", 25)
-    >>> other_bob = Person("Bob", 20)
-    >>> third_bob = Person("Bobbert", 25)
-    >>> alice != bob
-    True
-    >>> alice == bob
-    False
-    >>> bob == bob2
-    True
-    >>> bob != other_bob
-    True
-    >>> other_bob != third_bob
-    True
-    >>> third_bob != bob
-    True
-
-    ```
-
-    See Also: hashable
     """
 
-    def inherit(child):
-        return type(child.__name__, (cls, child), {})
+    def values(self):
+        if hasattr(self, '__dict__'):
+            return self.__dict__.values()
+        else:
+            return [getattr(self, attr) for attr in self.__slots__]
 
-    cls_str = '''
-    @inherit
-    class {cls}:
-        def __eq__(self, other):
-            if not isinstance(other, type(self)):
-                return NotImplemented
-            pairs = zip(self.__dict__.values(), other.__dict__.values())
-            return all([i[0] == i[1] for i in pairs])
-    '''.format(cls=cls.__name__).replace('\n    ', '\n')
-
-    exec(cls_str)
-    return locals()['{}'.format(cls.__name__)]
+    def __eq__(self, other):
+        if not isinstance(other, type(self)):
+            return NotImplemented
+        pairs = zip(values(self), values(other))
+        return all([i[0] == i[1] for i in pairs])
+    setattr(cls, '__eq__', __eq__)
+    return cls
 
 
 def hashable(cls):
@@ -731,7 +821,8 @@ def hashable(cls):
         for (name, value) in self.__dict__.items():
             if type(value).__hash__ is None:
                 fmt_str = "value of type {} can't be hashed because the field {}={} (type={}) is not hashable"
-                str_format = fmt_str.format(repr(cls.__name__), repr(name), repr(value), repr(type(value).__name__))
+                str_format = fmt_str.format(repr(cls.__name__), repr(
+                    name), repr(value), repr(type(value).__name__))
                 raise TypeError(str_format)
         return super_hasher(cls, self) ^ functools.reduce(hasher, self.__dict__.values(), 0)
 
@@ -782,7 +873,8 @@ def final(cls):
     """
 
     def error(*args, **kwargs):
-        raise TypeError("Cannot inherit from final class {}".format(repr(cls.__name__)))
+        raise TypeError(
+            "Cannot inherit from final class {}".format(repr(cls.__name__)))
 
     setattr(cls, '__init_subclass__', error)
     return cls
@@ -895,11 +987,13 @@ def log(destination: typing.IO, include_results: bool = False):
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            destination.write(f'Call to {fn.__name__!r} with arguments: args={args!r}, kwargs={kwargs!r}\n')
+            destination.write(f'Call to {fn.__name__!r} with arguments: args={
+                              args!r}, kwargs={kwargs!r}\n')
             try:
                 result = fn(*args, **kwargs)
             except Exception as e:
-                destination.write(f'Exception raised during function call: {e!r}')
+                destination.write(
+                    f'Exception raised during function call: {e!r}')
                 raise
             else:
                 if include_results:
@@ -1112,7 +1206,8 @@ def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStora
 
             def decorator(*args):
                 if args not in cache:
-                    raise NoSuchValue('{} was not precomputed for the given function'.format(args))
+                    raise NoSuchValue(
+                        '{} was not precomputed for the given function'.format(args))
                 return cache[args]
 
             return decorator
