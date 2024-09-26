@@ -9,30 +9,35 @@ Python decorators that I like to use a lot.
 Named based on my name which starts with a T. You can find more information reading the docstrings of the functions
 
 ### Decorators are
-  *  accepts
-  *  json_serializable
-  *  builder
-  *  tattle
-  *  spread
-  *  timed
-  *  squash
-  *  stringable
-  *  equatable
-  *  hashable
-  *  orderable
-  *  dataclass
-  *  final
-  *  freeze
-  *  deprecated
-  *  log
-  *  synchronized
-  *  count_calls
-  *  interruptable
-  *  lazy
-  *  precompute
+
+- accepts
+- returns
+- interruptable
+- json_serializable
+- spread
+- builder
+- tattle
+- timed
+- squash
+- stringable
+- equatable
+- hashable
+- orderable
+- dataclass
+- final
+- freeze
+- deprecated
+- log
+- synchronized
+- count_calls
+- lazy
+- precompute
 
 ### Support from types
-  *  Self
-  *  PrecomputeStorage
-  *  NoSuchValue
-  *  TattleOptions
+
+- Self
+- PredicateType
+- TattleOptions
+- FrozenClassError
+- PrecomputeStorage
+- NoSuchValue
