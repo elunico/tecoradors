@@ -95,7 +95,7 @@ def _isiterable(t):
         return False
 
 
-def accepts(*types: typing.Union[type, typing.Tuple[type]]):
+def accepts(*types: type | typing.Tuple[type | None]):
     """
     Provides a declaration-site and run-time check of the types of the arguments passed to a function or method
 
@@ -144,7 +144,7 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
             len(types) == argcount
         ), f"Not enough types for arg count, expected {argcount} but got {len(types)}"
 
-        def _check_raw_type(a: typing.Any, t: typing.Union[type, tuple[type]]) -> None:
+        def _check_raw_type(a: typing.Any, t: type | typing.Tuple[type | None]) -> None:
             """
             Determines if argument a is of type t. If t is iterable checks if a is of any of the types in t.
             If t is Self or contains Self, there is a check to get the class that defined the method and determine
@@ -164,7 +164,10 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
             if _isiterable(t) and not isinstance(t, enum.EnumMeta):
                 # if Self is given, check a against Self using _get_class_that_defined_method otherwise just check a
                 t = tuple(
-                    [_get_class_that_defined_method(f) if i is Self else i for i in t]
+                    [
+                        _get_class_that_defined_method(f) if i is Self else i
+                        for i in typing.cast(typing.Tuple[type], t)
+                    ]
                 )
                 assert all(
                     i is not None for i in t
@@ -431,7 +434,7 @@ def builder(typechecking: bool | typing.Callable = True) -> typing.Any:
     The builder decorator allows you to create builder classes based on the desired attributes and optionally types.
 
     You can define a class with attributes and types and decorate with the builder decorator and you will get
-        -  An __init__ that takes no arguments and initializes all fields to None
+        -  An __init__ that takes no arguments and initializes all fields to their given values or None if no value is provided
         -  A setX method for every attribute defined in the class which sets the corresponding field and returns self
 
     If you decorate a class @builder you get type checking by default. This is equivalent to @builder(True) and if you
@@ -443,7 +446,7 @@ def builder(typechecking: bool | typing.Callable = True) -> typing.Any:
     >>> class HTTPServerOptions:
     >>>     ip: str
     >>>     port: int
-    >>>     username: str
+    >>>     username: str = 'admin'
 
     This would generate the equivalent of
 
@@ -451,7 +454,7 @@ def builder(typechecking: bool | typing.Callable = True) -> typing.Any:
     >>>     def __init__(self):
     >>>         self.ip = None
     >>>         self.port = None
-    >>>         self.username = None
+    >>>         self.username = 'admin'
     >>>
     >>>     def setip(self, value):
     >>>         if not isinstance(value, str):
@@ -483,10 +486,12 @@ def builder(typechecking: bool | typing.Callable = True) -> typing.Any:
     >>> class HTTPServerOptions:
     >>>     ip: IPAddressPredicate
     >>>     port: int
-    >>>     username: str
+    >>>     username: str = 'admin'
 
     Only subclasses of PredicateType can be used to do this predicate-based checking. Any other type will be
     used for isinistance checking.
+
+    *Predicate checking is **NOT** done for the initial value on the class only in the setter*
     """
 
     def builder_interior(cls):
@@ -748,73 +753,6 @@ def stringable(cls):
     setattr(cls, "__repr__", __str__)
 
     return cls
-
-
-# def equatable(cls):
-#     """
-#     Adds an __eq__ method that compares all the values in an object's __dict__ to all the values in another instance
-#     of that object's dict. Note keys are NOT checked, however types are. Note that subclasses are necessarily accepted
-#     because of how the decorators work
-
-#     NOTE: this method will return a *new subtype* of cls with en __eq__ defined. This will cause the type to be unhashable.
-#     If you want property-wise equality with hashing, use the @hashable decorator. Because of the use of a decorator, the
-#     original name of the class being decorated will become the subtype returned by these decorators. This allows the subtyping
-#     to be mostly transparent, however, if you store a reference to the class and call the decorator manually, you can have access
-#     to both instance. This is not recommended.
-
-#     Example:
-#     ```
-#     >>> class Thing:
-#     ...     def __init__(self, a, b):
-#     ...         self.a = a
-#     ...         self.b = b
-#     >>> EquatableThing = equatable(Thing)
-#     >>> Thing != EquatableThing
-#     True
-
-#     >>> @equatable
-#     ... class Person:
-#     ...     def __init__(self, name, age):
-#     ...         self.name = name
-#     ...         self.age = age
-#     >>> alice = Person("Alice", 23)
-#     >>> bob = Person("Bob", 25)
-#     >>> bob2 = Person("Bob", 25)
-#     >>> other_bob = Person("Bob", 20)
-#     >>> third_bob = Person("Bobbert", 25)
-#     >>> alice != bob
-#     True
-#     >>> alice == bob
-#     False
-#     >>> bob == bob2
-#     True
-#     >>> bob != other_bob
-#     True
-#     >>> other_bob != third_bob
-#     True
-#     >>> third_bob != bob
-#     True
-
-#     ```
-
-#     See Also: hashable
-#     """
-
-#     def inherit(child):
-#         return type(child.__name__, (cls, child), {})
-
-#     cls_str = '''
-#     @inherit
-#     class {cls}:
-#         def __eq__(self, other):
-#             if not isinstance(other, type(self)):
-#                 return NotImplemented
-#             pairs = zip(self.__dict__.values(), other.__dict__.values())
-#             return all([i[0] == i[1] for i in pairs])
-#     '''.format(cls=cls.__name__).replace('\n    ', '\n')
-
-#     exec(cls_str)
-#     return locals()['{}'.format(cls.__name__)]
 
 
 def equatable(cls):
