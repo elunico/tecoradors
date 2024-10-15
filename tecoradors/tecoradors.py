@@ -494,14 +494,17 @@ def builder(typechecking: bool | typing.Callable = True) -> typing.Any:
 
         def cls_init(self):
             for attr, typename in attributes.items():
-                setattr(self, attr, getattr(cls, attr))
+                setattr(self, attr, getattr(cls, attr, None))
 
         def setter_maker(attr):
             def setter(self, value):
                 if typechecking:
                     # cannot type check dict[str] only dict, etc.
                     # very poor solution for Callable, but ¯\_(ツ)_/¯
-                    attr_type = typing.get_origin(attributes[attr])
+                    if typing.get_args(attributes[attr]):
+                        attr_type = typing.get_origin(attributes[attr])
+                    else:
+                        attr_type = attributes[attr]
                     if isinstance(attr_type, str):
                         if not isinstance(value, eval(attr_type)):
                             raise TypeError(
