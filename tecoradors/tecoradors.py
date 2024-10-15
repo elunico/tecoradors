@@ -20,20 +20,25 @@ def _get_class_that_defined_method(meth: typing.Callable) -> typing.Optional[typ
     if isinstance(meth, functools.partial):
         return _get_class_that_defined_method(meth.func)
     if inspect.ismethod(meth) or (
-            inspect.isbuiltin(meth) and getattr(meth, '__self__', None) is not None and getattr(meth.__self__,
-                                                                                                '__class__', None)):
+        inspect.isbuiltin(meth)
+        and getattr(meth, "__self__", None) is not None
+        and getattr(meth.__self__, "__class__", None)
+    ):
         for cls in meth.__self__.__class__.__mro__:
             if meth.__name__ in cls.__dict__:
                 return cls
         # fallback to __qualname__ parsing
-        meth = getattr(meth, '__func__', meth)
+        meth = getattr(meth, "__func__", meth)
     if inspect.isfunction(meth):
-        cls = getattr(inspect.getmodule(meth), meth.__qualname__.split(
-            '.<locals>', 1)[0].rsplit('.', 1)[0], None)
+        cls = getattr(
+            inspect.getmodule(meth),
+            meth.__qualname__.split(".<locals>", 1)[0].rsplit(".", 1)[0],
+            None,
+        )
         if isinstance(cls, type):
             return cls
     # handle special descriptor objects
-    return getattr(meth, '__objclass__', None)
+    return getattr(meth, "__objclass__", None)
 
 
 class Self(type):
@@ -115,7 +120,7 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
 
     def check_self_or_cls(var_names):
         # determine if the first arg is self or cls (we will not check this param)
-        return len(var_names) > 0 and (var_names[0] == 'self' or var_names[0] == 'cls')
+        return len(var_names) > 0 and (var_names[0] == "self" or var_names[0] == "cls")
 
     def check_accepts(f):
         """
@@ -125,16 +130,19 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
 
         Returns: a new wrapped function with run time type checking
         """
-        if hasattr(f, '_knows_returns') and f._knows_returns:
+        if hasattr(f, "_knows_returns") and f._knows_returns:
             raise TypeError(
-                "You must decorate a function with accepts() before returns()")
+                "You must decorate a function with accepts() before returns()"
+            )
 
         vnames = f.__code__.co_varnames
         is_bound = check_self_or_cls(vnames)
-        argcount = f.__code__.co_argcount - \
-            (0 if not is_bound else 1)  # remove self or cls if present
-        assert len(types) == argcount, f"Not enough types for arg count, expected {
-            argcount} but got {len(types)}"
+        argcount = f.__code__.co_argcount - (
+            0 if not is_bound else 1
+        )  # remove self or cls if present
+        assert (
+            len(types) == argcount
+        ), f"Not enough types for arg count, expected {argcount} but got {len(types)}"
 
         def _check_raw_type(a: typing.Any, t: typing.Union[type, tuple[type]]) -> None:
             """
@@ -155,19 +163,26 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
             # if it not an enum otherwise treat it as a single class
             if _isiterable(t) and not isinstance(t, enum.EnumMeta):
                 # if Self is given, check a against Self using _get_class_that_defined_method otherwise just check a
-                t = tuple([_get_class_that_defined_method(f)
-                          if i is Self else i for i in t])
+                t = tuple(
+                    [_get_class_that_defined_method(f) if i is Self else i for i in t]
+                )
                 assert all(
-                    i is not None for i in t), f"Cannot accept Self on non-bound method {f.__name__}"
+                    i is not None for i in t
+                ), f"Cannot accept Self on non-bound method {f.__name__}"
             else:
                 # if t is a single type check for Self and check for Self otherwise just check a against t
                 t = _get_class_that_defined_method(f) if t is Self else t
-                assert t is not None, f"Cannot accept Self on non-bound method {
-                    f.__name__}"
-            assert isinstance(a, t), f"{f.__name__}: got argument {a} (type of {type(a)}) " + \
-                f"but expected argument of type(s) {t}"
+                assert (
+                    t is not None
+                ), f"Cannot accept Self on non-bound method {f.__name__}"
+            assert isinstance(a, t), (
+                f"{f.__name__}: got argument {a} (type of {type(a)}) "
+                + f"but expected argument of type(s) {t}"
+            )
 
-        def _check_callable(a: typing.Any, predicate: typing.Callable[[type], bool]) -> None:
+        def _check_callable(
+            a: typing.Any, predicate: typing.Callable[[type], bool]
+        ) -> None:
             """
             Instead of checking a directly against a type, t, this function can check a against a predicate.
             t is a predicate which takes the argument a and determines if it is valid. t should raise an AssertionError
@@ -180,18 +195,20 @@ def accepts(*types: typing.Union[type, typing.Tuple[type]]):
 
             """
             try:
-                assert predicate(a), f'function received {
-                    a} which did pass the type check {predicate}'
+                assert predicate(
+                    a
+                ), f"function received {a} which did pass the type check {predicate}"
             except AssertionError:
                 raise
             except Exception as e:
-                raise AssertionError(f"Function could not validate parameter {
-                                     a} with function {predicate}") from e
+                raise AssertionError(
+                    f"Function could not validate parameter {a} with function {predicate}"
+                ) from e
 
         @functools.wraps(f)
         def new_f(*args, **kwds):
             for_args = args[1:] if is_bound else args
-            for (a, t) in zip(for_args, types):
+            for a, t in zip(for_args, types):
                 if inspect.isfunction(t):
                     _check_callable(a, t)
                 else:
@@ -241,33 +258,46 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
         def wrapper(*args, **kwargs):
             nonlocal types
             result = fn(*args, **kwargs)
-            types = tuple(_get_class_that_defined_method(fn)
-                          if i is Self else i for i in types)
+            types = tuple(
+                _get_class_that_defined_method(fn) if i is Self else i for i in types
+            )
             assert all(
-                i is not None for i in types), "Cannot have return type of Self on non-method object"
+                i is not None for i in types
+            ), "Cannot have return type of Self on non-method object"
             if isinstance(result, tuple):
                 if len(result) != len(types):
                     raise AssertionError(
-                        'Expected {} values returned but got {}'.format(len(types), len(result)))
+                        "Expected {} values returned but got {}".format(
+                            len(types), len(result)
+                        )
+                    )
                 for value, cls in zip(result, types):
                     if _isiterable(cls) and not isinstance(cls, enum.EnumMeta):
-                        cls = tuple(_get_class_that_defined_method(
-                            fn) if i is Self else i for i in cls)
-                    assert isinstance(value, cls), 'Return type expected {} but ' \
-                                                   'received {} of type {}'.format(
-                                                       cls, value, type(value))
+                        cls = tuple(
+                            _get_class_that_defined_method(fn) if i is Self else i
+                            for i in cls
+                        )
+                    assert isinstance(
+                        value, cls
+                    ), "Return type expected {} but " "received {} of type {}".format(
+                        cls, value, type(value)
+                    )
             else:
                 t = types[0]
                 if _isiterable(t) and not isinstance(t, enum.EnumMeta):
-                    t = tuple(_get_class_that_defined_method(
-                        fn) if i is Self else i for i in t)
-                assert isinstance(result, t), 'Return type expected {} but ' \
-                                              'received {} of type {}'.format(
-                                                  t, result, type(result))
+                    t = tuple(
+                        _get_class_that_defined_method(fn) if i is Self else i
+                        for i in t
+                    )
+                assert isinstance(
+                    result, t
+                ), "Return type expected {} but " "received {} of type {}".format(
+                    t, result, type(result)
+                )
             return result
 
         # used to check for the correct order of accepts and returns.
-        setattr(wrapper, '_knows_returns', True)
+        setattr(wrapper, "_knows_returns", True)
         return wrapper
 
     return decorator
@@ -275,16 +305,17 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
 
 def interruptable(fn: typing.Union[typing.Callable, str]):
     """
-        a decorator that can be used to allow a function to seemlessly accept
-        a KeyboardInterrupt. When a function is decorated with only
-        @interruptable, then it will return None on KeyboardInterrupt but
-        not propogate the exception
+    a decorator that can be used to allow a function to seemlessly accept
+    a KeyboardInterrupt. When a function is decorated with only
+    @interruptable, then it will return None on KeyboardInterrupt but
+    not propogate the exception
 
-        If the function is decorated with @interruptable(string) then it will
-        print string and return None on KeyboardInterrupt and not propogate
-        the exception
+    If the function is decorated with @interruptable(string) then it will
+    print string and return None on KeyboardInterrupt and not propogate
+    the exception
     """
     if callable(fn):
+
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             try:
@@ -297,7 +328,8 @@ def interruptable(fn: typing.Union[typing.Callable, str]):
     else:
         if not isinstance(fn, str):
             raise TypeError(
-                '@interruptable must be passed a function or a string as its argument')
+                "@interruptable must be passed a function or a string as its argument"
+            )
 
         def inner(func):
             def wrapper(*args, **kwargs):
@@ -341,7 +373,7 @@ def json_serializable(cls: typing.Type):
     def to_json(self) -> str:
         return json.dumps(self.__dict__, cls=MyEncoder)
 
-    setattr(cls, 'to_json', to_json)
+    setattr(cls, "to_json", to_json)
     return cls
 
 
@@ -368,32 +400,33 @@ def spread(times: int):
 
 
 class PredicateType:
-    '''
+    """
     A PredicateType is subclassed as a means to provide custom type checking. A PredicateType is used for value checking
-    and not instance checking. A TypeError will be raised if the value does not satisfy the predicate. 
+    and not instance checking. A TypeError will be raised if the value does not satisfy the predicate.
 
-    Subclasses of PredicateType are used for attribute type checking in classes decorated with @builder. 
+    Subclasses of PredicateType are used for attribute type checking in classes decorated with @builder.
     When an annotation is a subclass of PredicateType, the builder will use the PredicateType.check method to check
     if the value satisfies the predicate. Otherwise, instance checking will be used, which means that the value must be of
-    an instance of the type specified by the annotation. 
+    an instance of the type specified by the annotation.
 
     To use this class you must subclass and override the isacceptable method to provide the custom type checking logic.
-    The isacceptable method should return True if the value satisfies the predicate and False otherwise. 
+    The isacceptable method should return True if the value satisfies the predicate and False otherwise.
     The isacceptable method should be a class method.
-    '''
+    """
 
     @classmethod
     def check(cls, attr: str, value: typing.Any):
         if not cls.isacceptable(value):
-            raise TypeError(f"Excepted attribute '{attr}' to satisfy predicate {
-                            cls} but got {value}")
+            raise TypeError(
+                f"Excepted attribute '{attr}' to satisfy predicate {cls} but got {value}"
+            )
 
     @classmethod
     def isacceptable(cls, value: typing.Any) -> bool:
         raise NotImplementedError("Subclass must implement abstract method")
 
 
-def builder(typechecking: bool = True):
+def builder(typechecking: bool | typing.Callable = True) -> typing.Any:
     """
     The builder decorator allows you to create builder classes based on the desired attributes and optionally types.
 
@@ -438,13 +471,13 @@ def builder(typechecking: bool = True):
     >>>         self.username = value
     >>>         return self
 
-    You may also annotate the attributes with a subclass of PredicateType  to customize the type checking. 
+    You may also annotate the attributes with a subclass of PredicateType  to customize the type checking.
     For example, if you want to make sure that the ip address is a valid ip address you can do the following:
 
     >>> class IPAddressPredicate(PredicateType):
     >>>     @classmethod
     >>>     def isacceptable(self, value: str) -> bool:
-    >>>         return re.match(r"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$", value) is not None
+    >>>         return re.match(r"^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", value) is not None
 
     >>> @builder
     >>> class HTTPServerOptions:
@@ -452,34 +485,49 @@ def builder(typechecking: bool = True):
     >>>     port: int
     >>>     username: str
 
-    Only subclasses of PredicateType can be used to do this predicate-based checking. Any other type will be 
-    used for isinistance checking. 
+    Only subclasses of PredicateType can be used to do this predicate-based checking. Any other type will be
+    used for isinistance checking.
     """
 
     def builder_interior(cls):
         attributes = cls.__annotations__
 
         def cls_init(self):
-            for (attr, typename) in attributes.items():
-                setattr(self, attr, None)
+            for attr, typename in attributes.items():
+                setattr(self, attr, getattr(cls, attr))
 
         def setter_maker(attr):
             def setter(self, value):
                 if typechecking:
-                    if issubclass(attributes[attr], PredicateType):
-                        attributes[attr].check(attr, value)
-                    elif not isinstance(value, attributes[attr]):
+                    # cannot type check dict[str] only dict, etc.
+                    # very poor solution for Callable, but ¯\_(ツ)_/¯
+                    attr_type = typing.get_origin(attributes[attr])
+                    if isinstance(attr_type, str):
+                        if not isinstance(value, eval(attr_type)):
+                            raise TypeError(
+                                "Excepted attribute {} of type {} but got type {}".format(
+                                    attr, typename, type(value)
+                                )
+                            )
+                    elif isinstance(attr_type, type) and issubclass(
+                        attr_type, PredicateType
+                    ):
+                        attr_type.check(attr, value)
+                    elif not isinstance(value, attr_type):
                         raise TypeError(
-                            "Excepted attribute {} of type {} but got type {}".format(attr, typename, type(value)))
+                            "Excepted attribute {} of type {} but got type {}".format(
+                                attr, typename, type(value)
+                            )
+                        )
                 setattr(self, attr, value)
                 return self
 
             return setter
 
-        for (attr, typename) in attributes.items():
-            setattr(cls, 'set{}'.format(attr), setter_maker(attr))
+        for attr, typename in attributes.items():
+            setattr(cls, "set{}".format(attr), setter_maker(attr))
 
-        setattr(cls, '__init__', cls_init)
+        setattr(cls, "__init__", cls_init)
         return cls
 
     if callable(typechecking):
@@ -508,6 +556,7 @@ class TattleOptions:
     the function when it was called. This is never used if onexception is None or if the function returns normally
     without raising an Exception.
     """
+
     onenter: typing.Callable
     onexit: typing.Callable
     onexception: typing.Callable
@@ -521,18 +570,22 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
     with arguments at the appropriate time. These options can also be None and no action on that event will be taken
     """
     if callable(options):
+
         @functools.wraps(options)
         def wrapper(*args, **kwargs):
-            print("Call start: {}({}, {})".format(
-                options.__name__, args, kwargs))
+            print("Call start: {}({}, {})".format(options.__name__, args, kwargs))
             try:
                 result = options(*args, **kwargs)
             except Exception as e:
-                print("Call exception [{}]: {}({}, {})".format(
-                    e, options.__name__, args, kwargs))
+                print(
+                    "Call exception [{}]: {}({}, {})".format(
+                        e, options.__name__, args, kwargs
+                    )
+                )
             else:
-                print("Call finished: {}({}, {})".format(
-                    options.__name__, args, kwargs))
+                print(
+                    "Call finished: {}({}, {})".format(options.__name__, args, kwargs)
+                )
                 return result
 
         return wrapper
@@ -583,8 +636,10 @@ AnyFunction = typing.Callable[[typing.Any], typing.Any]
 ExceptionCallback = typing.Callable[[BaseException], typing.Any]
 
 
-def squash(exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Exception,),
-           on_squashed: typing.Union[typing.Optional[typing.Any], ExceptionCallback] = None):
+def squash(
+    exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Exception,),
+    on_squashed: typing.Union[typing.Optional[typing.Any], ExceptionCallback] = None,
+):
     """
     returns a function that handles exceptions differently.
 
@@ -652,11 +707,15 @@ def squash(exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Excep
                 if _isiterable(exceptions):
                     squashed = tuple(exceptions)
                 else:
-                    squashed = exceptions,
+                    squashed = (exceptions,)
                 if not isinstance(e, squashed):
                     raise
                 else:
-                    return on_squashed(e) if hasattr(on_squashed, '__call__') else on_squashed
+                    return (
+                        on_squashed(e)
+                        if hasattr(on_squashed, "__call__")
+                        else on_squashed
+                    )
 
         return wrapper
 
@@ -674,13 +733,16 @@ def stringable(cls):
     """
 
     def __str__(self):
-        items = ['{}={}'.format(k, repr(v)) for (k, v) in self.__dict__.items() if
-                 not k.startswith('__') and not k.endswith('__')]
-        items_string = ', '.join(items)
-        return '{}[{}]'.format(self.__class__.__name__, items_string)
+        items = [
+            "{}={}".format(k, repr(v))
+            for (k, v) in self.__dict__.items()
+            if not k.startswith("__") and not k.endswith("__")
+        ]
+        items_string = ", ".join(items)
+        return "{}[{}]".format(self.__class__.__name__, items_string)
 
-    setattr(cls, '__str__', __str__)
-    setattr(cls, '__repr__', __str__)
+    setattr(cls, "__str__", __str__)
+    setattr(cls, "__repr__", __str__)
 
     return cls
 
@@ -756,13 +818,13 @@ def equatable(cls):
     """
     Adds an __eq__ method that compares all the values in an object's __dict__ to all the values in another instance
     of that object's dict. Note keys are NOT checked, however types are. Note that if the class has a __slots__ attribute,
-    then the values in the __slots__ are compared. 
+    then the values in the __slots__ are compared.
     Note that subclasses are necessarily accepted
     because of how the decorators work
     """
 
     def values(self):
-        if hasattr(self, '__dict__'):
+        if hasattr(self, "__dict__"):
             return self.__dict__.values()
         else:
             return [getattr(self, attr) for attr in self.__slots__]
@@ -772,7 +834,8 @@ def equatable(cls):
             return NotImplemented
         pairs = zip(values(self), values(other))
         return all([i[0] == i[1] for i in pairs])
-    setattr(cls, '__eq__', __eq__)
+
+    setattr(cls, "__eq__", __eq__)
     return cls
 
 
@@ -818,15 +881,21 @@ def hashable(cls):
         return ((a << 8) | (a >> 56)) ^ hash(i)
 
     def __hash__(self):
-        for (name, value) in self.__dict__.items():
+        for name, value in self.__dict__.items():
             if type(value).__hash__ is None:
                 fmt_str = "value of type {} can't be hashed because the field {}={} (type={}) is not hashable"
-                str_format = fmt_str.format(repr(cls.__name__), repr(
-                    name), repr(value), repr(type(value).__name__))
+                str_format = fmt_str.format(
+                    repr(cls.__name__),
+                    repr(name),
+                    repr(value),
+                    repr(type(value).__name__),
+                )
                 raise TypeError(str_format)
-        return super_hasher(cls, self) ^ functools.reduce(hasher, self.__dict__.values(), 0)
+        return super_hasher(cls, self) ^ functools.reduce(
+            hasher, self.__dict__.values(), 0
+        )
 
-    setattr(cls, '__hash__', __hash__)
+    setattr(cls, "__hash__", __hash__)
     return cls
 
 
@@ -859,6 +928,7 @@ def dataclass(cls, **kwargs):
     See Also: dataclasses.dataclass
     """
     import dataclasses
+
     cls = dataclasses.dataclass(cls, **kwargs)
     cls = stringable(cls)
     return cls
@@ -873,10 +943,9 @@ def final(cls):
     """
 
     def error(*args, **kwargs):
-        raise TypeError(
-            "Cannot inherit from final class {}".format(repr(cls.__name__)))
+        raise TypeError("Cannot inherit from final class {}".format(repr(cls.__name__)))
 
-    setattr(cls, '__init_subclass__', error)
+    setattr(cls, "__init_subclass__", error)
     return cls
 
 
@@ -884,6 +953,7 @@ class FrozenClassError(Exception):
     """
     Raised by the @frozen decorator if a class attribute is set or del'd after class initialization
     """
+
     pass
 
 
@@ -916,32 +986,38 @@ def freeze(cls):
         """
 
         def error(self, *args, **kwargs):
-            if hasattr(self, '__gu__') and self.__gu__:
-                raise FrozenClassError("Class {!r} is frozen and cannot be "
-                                       "changed after instantiation".format(cls.__name__))
+            if hasattr(self, "__gu__") and self.__gu__:
+                raise FrozenClassError(
+                    "Class {!r} is frozen and cannot be "
+                    "changed after instantiation".format(cls.__name__)
+                )
             else:
                 getattr(super(cls, self), method_name)(*args, **kwargs)
 
         return error
 
-    cls.__setattr__ = create_frozen_method('__setattr__')
-    cls.__delattr__ = create_frozen_method('__delattr__')
-    cls.__setitem__ = create_frozen_method('__setitem__')
+    cls.__setattr__ = create_frozen_method("__setattr__")
+    cls.__delattr__ = create_frozen_method("__delattr__")
+    cls.__setitem__ = create_frozen_method("__setitem__")
 
     # preserve cls's init but wrap it so that we can hook in and set a property indicated initialization happened
-    old_init = getattr(cls, '__init__')
+    old_init = getattr(cls, "__init__")
 
     def new_init(self, *args, **kwargs):
         old_init(self, *args, **kwargs)
         self.__gu__ = True
 
-    setattr(cls, '__init__', new_init)
+    setattr(cls, "__init__", new_init)
 
     return cls
 
 
-def deprecated(reason: str, replacement: str, starting_version: typing.Optional[str] = None,
-               removed_version: typing.Optional[str] = None):
+def deprecated(
+    reason: str,
+    replacement: str,
+    starting_version: typing.Optional[str] = None,
+    removed_version: typing.Optional[str] = None,
+):
     """
     Marks a method or function as deprecated. Will print a DeprecationWarning
     with reason and the given replacement. Replacement should be whatever
@@ -952,13 +1028,16 @@ def deprecated(reason: str, replacement: str, starting_version: typing.Optional[
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            warnings.warn(f'function {fn.__name__!r} is deprecated: {reason!r}. Use {replacement!r} instead.',
-                          category=DeprecationWarning, stacklevel=2)
+            warnings.warn(
+                f"function {fn.__name__!r} is deprecated: {reason!r}. Use {replacement!r} instead.",
+                category=DeprecationWarning,
+                stacklevel=2,
+            )
             return fn(*args, **kwargs)
 
-        setattr(wrapper, 'deprecation_reason', reason)
-        setattr(wrapper, 'deprecation_starting_in', starting_version)
-        setattr(wrapper, 'deprecation_remove_in', removed_version)
+        setattr(wrapper, "deprecation_reason", reason)
+        setattr(wrapper, "deprecation_starting_in", starting_version)
+        setattr(wrapper, "deprecation_remove_in", removed_version)
         return wrapper
 
     return decorator
@@ -987,19 +1066,19 @@ def log(destination: typing.IO, include_results: bool = False):
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            destination.write(f'Call to {fn.__name__!r} with arguments: args={
-                              args!r}, kwargs={kwargs!r}\n')
+            destination.write(
+                f"Call to {fn.__name__!r} with arguments: args={args!r}, kwargs={kwargs!r}\n"
+            )
             try:
                 result = fn(*args, **kwargs)
             except Exception as e:
-                destination.write(
-                    f'Exception raised during function call: {e!r}')
+                destination.write(f"Exception raised during function call: {e!r}")
                 raise
             else:
                 if include_results:
-                    destination.write(f'|-- result={result!r}')
+                    destination.write(f"|-- result={result!r}")
 
-            destination.write('\n')
+            destination.write("\n")
             return result
 
         return wrapper
@@ -1060,7 +1139,11 @@ def count_calls(with_args: bool = False, with_kwargs: bool = False):
 
     def decorator(fn):
         def key(*args, **kwargs):
-            return (args if with_args else (args, str(kwargs))) if with_args or with_kwargs else fn
+            return (
+                (args if with_args else (args, str(kwargs)))
+                if with_args or with_kwargs
+                else fn
+            )
 
         counts = Counter()
 
@@ -1071,19 +1154,21 @@ def count_calls(with_args: bool = False, with_kwargs: bool = False):
             return result
 
         if not with_args:
-            def call_count(*args, **kwargs):
+
+            def call_count1(*args, **kwargs):
                 check_args(*args, **kwargs)
                 return sum(counts.values())
 
-            setattr(wrapper, 'call_count', call_count)
+            setattr(wrapper, "call_count", call_count1)
         else:
+
             def call_count(*args, **kwargs):
                 check_args(*args, **kwargs)
                 if not args and not kwargs:
                     return counts
                 return counts[key(*args, **kwargs)]
 
-            setattr(wrapper, 'call_count', call_count)
+            setattr(wrapper, "call_count", call_count)
 
         def reset_count(*args, **kwargs):
             nonlocal counts
@@ -1095,30 +1180,39 @@ def count_calls(with_args: bool = False, with_kwargs: bool = False):
 
         def check_args(*args, **kwargs):
             if args and not with_args:
-                raise ValueError("args passed to a count_calls() function, but with_args was not passed to "
-                                 "count_calls()")
+                raise ValueError(
+                    "args passed to a count_calls() function, but with_args was not passed to "
+                    "count_calls()"
+                )
             if kwargs and not with_kwargs:
-                raise ValueError("kwargs passed to a count_calls() function, but with_kwargs was not passed to "
-                                 "count_calls()")
+                raise ValueError(
+                    "kwargs passed to a count_calls() function, but with_kwargs was not passed to "
+                    "count_calls()"
+                )
 
-        setattr(wrapper, 'reset_call_count', reset_count)
+        setattr(wrapper, "reset_call_count", reset_count)
         return wrapper
 
     return decorator
 
 
-T = typing.TypeVar('T')
-R = typing.TypeVar('R')
+T = typing.TypeVar("T")
+R = typing.TypeVar("R")
 
 
 class Descriptor(typing.Protocol):
-    def __get__(this, self: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> \
-            typing.Union[T, typing.Self]:
+    def __get__(
+        this,
+        self: typing.Optional[R],
+        owner: typing.Optional[typing.Any] = None,
+        *args,
+        **kwargs,
+    ) -> typing.Union[object, typing.Self]:
         ...
 
 
 def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
-    '''
+    """
     Similar to the `@property` decorator, lazy allows you to access the value computed by a method
     call as if it were a simple attribute on an instance. The main difference between `@property`
     and `@lazy` is that `@property` performs the computation on every attribute access, where as
@@ -1130,11 +1224,16 @@ def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
     in a function, and only evaluating the function when accessed. It also elimited the overhead of
     other similar solutions like `@functools.cache` by re-writing the attribute after first access,
     removing the descriptor and obviating the need for an `if arg in cache` check
-    '''
+    """
 
     class descriptor(Descriptor):
-        def __get__(self, receiver: typing.Optional[R], owner: typing.Optional[typing.Any] = None, *args, **kwargs) -> \
-                typing.Union[T, typing.Self]:
+        def __get__(
+            self,
+            receiver: typing.Optional[R],
+            owner: typing.Optional[typing.Any] = None,
+            *args,
+            **kwargs,
+        ) -> typing.Union[T, typing.Self]:
             if receiver is None:
                 return self
             value = method(receiver, *args, **kwargs)
@@ -1145,17 +1244,20 @@ def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
 
 
 class PrecomputeStorage(enum.Enum):
-    EXCLUSIVE = 1
-    LIMITED = 2
-    PRESERVING = 3
+    EXCLUSIVE = enum.auto()
+    LIMITED = enum.auto()
+    PRESERVING = enum.auto()
 
 
 class NoSuchValue(ValueError):
     pass
 
 
-def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStorage = PrecomputeStorage.PRESERVING,
-               max: typing.Optional[int] = None):
+def precompute(
+    argument_tuples: typing.Iterable[tuple],
+    storage: PrecomputeStorage = PrecomputeStorage.PRESERVING,
+    max: typing.Optional[int] = None,
+):
     """
     Function decorator used to declaratively state precomputed values for a function
 
@@ -1173,7 +1275,8 @@ def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStora
     if storage != PrecomputeStorage.PRESERVING and max is not None:
         raise ValueError("storage must be PRESERVING or max must be None")
     if storage == PrecomputeStorage.PRESERVING:
-        def wrapper(fn):
+
+        def wrapper1(fn):
             @functools.lru_cache(maxsize=max)
             def decorator(*args):
                 return fn(*args)
@@ -1182,8 +1285,9 @@ def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStora
                 decorator(*args)  # cached by functools
             return decorator
 
-        return wrapper
+        return wrapper1
     elif storage == PrecomputeStorage.LIMITED:
+
         def wrapper(fn):
             cache = {}
             for args in argument_tuples:
@@ -1199,6 +1303,7 @@ def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStora
 
         return wrapper
     else:
+
         def wrapper(fn):
             cache = {}
             for args in argument_tuples:
@@ -1207,7 +1312,8 @@ def precompute(argument_tuples: typing.Iterable[tuple], storage: PrecomputeStora
             def decorator(*args):
                 if args not in cache:
                     raise NoSuchValue(
-                        '{} was not precomputed for the given function'.format(args))
+                        "{} was not precomputed for the given function".format(args)
+                    )
                 return cache[args]
 
             return decorator
