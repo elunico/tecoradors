@@ -95,7 +95,7 @@ def _isiterable(t):
         return False
 
 
-def accepts(*types: type | typing.Tuple[type | None]):
+def accepts(*types: tuple[type]):
     """
     Provides a declaration-site and run-time check of the types of the arguments passed to a function or method
 
@@ -144,7 +144,7 @@ def accepts(*types: type | typing.Tuple[type | None]):
             len(types) == argcount
         ), f"Not enough types for arg count, expected {argcount} but got {len(types)}"
 
-        def _check_raw_type(a: typing.Any, t: type | typing.Tuple[type | None]) -> None:
+        def _check_raw_type(a: typing.Any, t: list[type | None]) -> None:
             """
             Determines if argument a is of type t. If t is iterable checks if a is of any of the types in t.
             If t is Self or contains Self, there is a check to get the class that defined the method and determine
@@ -161,24 +161,21 @@ def accepts(*types: type | typing.Tuple[type | None]):
             """
             # can pass in many types that are valid for a, but if Enum is passed in this breaks, so only iterate t
             # if it not an enum otherwise treat it as a single class
-            if _isiterable(t) and not isinstance(t, enum.EnumMeta):
+            if not isinstance(t, enum.EnumMeta):
                 # if Self is given, check a against Self using _get_class_that_defined_method otherwise just check a
-                t = tuple(
-                    [
-                        _get_class_that_defined_method(f) if i is Self else i
-                        for i in typing.cast(typing.Tuple[type], t)
-                    ]
-                )
-                assert all(
-                    i is not None for i in t
-                ), f"Cannot accept Self on non-bound method {f.__name__}"
+                t = [_get_class_that_defined_method(f) if i is Self else i for i in t]
+                if not all(i is not None for i in t):
+                    raise TypeError(
+                        f"Self is meaningless on non-bound method {f.__name__}"
+                    )
             else:
                 # if t is a single type check for Self and check for Self otherwise just check a against t
-                t = _get_class_that_defined_method(f) if t is Self else t
-                assert (
-                    t is not None
-                ), f"Cannot accept Self on non-bound method {f.__name__}"
-            assert isinstance(a, t), (
+                t = [_get_class_that_defined_method(f) if t is Self else t]
+                if any(i is None for i in t):
+                    raise TypeError(
+                        f"Self is meaningless on non-bound method {f.__name__}"
+                    )
+            assert isinstance(a, typing.cast(tuple[type], t)), (
                 f"{f.__name__}: got argument {a} (type of {type(a)}) "
                 + f"but expected argument of type(s) {t}"
             )
@@ -215,7 +212,7 @@ def accepts(*types: type | typing.Tuple[type | None]):
                 if inspect.isfunction(t):
                     _check_callable(a, t)
                 else:
-                    _check_raw_type(a, t)
+                    _check_raw_type(a, list(t))
             return f(*args, **kwds)
 
         return new_f
@@ -223,7 +220,7 @@ def accepts(*types: type | typing.Tuple[type | None]):
     return check_accepts
 
 
-def returns(*types: typing.Union[type, typing.Tuple[type]]):
+def returns(*types: type | typing.Iterable[type]):
     """
     Run time assertions for the return type of a function. Use this decorator by annotating a function with @returns()
     and the types that you expect the function to return. Some important notes about syntax:
@@ -278,7 +275,7 @@ def returns(*types: typing.Union[type, typing.Tuple[type]]):
                     if _isiterable(cls) and not isinstance(cls, enum.EnumMeta):
                         cls = tuple(
                             _get_class_that_defined_method(fn) if i is Self else i
-                            for i in cls
+                            for i in typing.cast(typing.Iterable[type], cls)
                         )
                     assert isinstance(
                         value, cls
@@ -713,7 +710,7 @@ def squash(
                 return fn(*args, **kwargs)
             except BaseException as e:
                 if _isiterable(exceptions):
-                    squashed = tuple(exceptions)
+                    squashed = tuple(typing.cast(TupleOfExceptionTypes, exceptions))
                 else:
                     squashed = (exceptions,)
                 if not isinstance(e, squashed):
@@ -755,6 +752,13 @@ def stringable(cls):
     return cls
 
 
+def _values_of(self: typing.Any) -> list[typing.Any]:
+    if hasattr(self, "__dict__"):
+        return list(self.__dict__.values())
+    else:
+        return [getattr(self, attr) for attr in self.__slots__]
+
+
 def equatable(cls):
     """
     Adds an __eq__ method that compares all the values in an object's __dict__ to all the values in another instance
@@ -764,16 +768,10 @@ def equatable(cls):
     because of how the decorators work
     """
 
-    def values(self):
-        if hasattr(self, "__dict__"):
-            return self.__dict__.values()
-        else:
-            return [getattr(self, attr) for attr in self.__slots__]
-
     def __eq__(self, other):
         if not isinstance(other, type(self)):
             return NotImplemented
-        pairs = zip(values(self), values(other))
+        pairs = zip(_values_of(self), _values_of(other))
         return all([i[0] == i[1] for i in pairs])
 
     setattr(cls, "__eq__", __eq__)
@@ -823,7 +821,7 @@ def hashable(cls):
 
     def __hash__(self):
         for name, value in self.__dict__.items():
-            if type(value).__hash__ is None:
+            if not hasattr(type(value), "__hash__") or type(value).__hash__ is None:
                 fmt_str = "value of type {} can't be hashed because the field {}={} (type={}) is not hashable"
                 str_format = fmt_str.format(
                     repr(cls.__name__),
@@ -832,9 +830,7 @@ def hashable(cls):
                     repr(type(value).__name__),
                 )
                 raise TypeError(str_format)
-        return super_hasher(cls, self) ^ functools.reduce(
-            hasher, self.__dict__.values(), 0
-        )
+        return super_hasher(cls, self) ^ functools.reduce(hasher, _values_of(self), 0)
 
     setattr(cls, "__hash__", __hash__)
     return cls
