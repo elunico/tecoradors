@@ -42,6 +42,43 @@ def _get_class_that_defined_method(meth: typing.Callable) -> typing.Optional[typ
     return getattr(meth, "__objclass__", None)
 
 
+def deprecated(
+    reason: str,
+    replacement: str,
+    starting_version: typing.Optional[str] = None,
+    removed_version: typing.Optional[str] = None,
+):
+    """
+    Marks a method or function as deprecated. Will print a DeprecationWarning
+    with reason and the given replacement. Replacement should be whatever
+    can be used to replace the deprecated method or function
+    """
+    import warnings
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            warnings.warn(
+                f"function {fn.__name__!r} is deprecated: {reason!r}. Use {replacement!r} instead.",
+                category=DeprecationWarning,
+                stacklevel=2,
+            )
+            return fn(*args, **kwargs)
+
+        setattr(wrapper, "deprecation_reason", reason)
+        setattr(wrapper, "deprecation_starting_in", starting_version)
+        setattr(wrapper, "deprecation_remove_in", removed_version)
+        return wrapper
+
+    return decorator
+
+
+@deprecated(
+    reason="It is used only with @accepts and @returns which is also deprecated",
+    replacement="Use @EnforceAnnotations and annotations rather than Self with @accepts and @returns",
+    starting_version="6.4.2",
+    removed_version="8.0.0",
+)
 class Self(type):
     """
     This class stands in for the type of the class being defined. Since decorators require evaluation
@@ -295,41 +332,11 @@ def enforce_annotations(fn):
     return wrapper
 
 
-def deprecated(
-    reason: str,
-    replacement: str,
-    starting_version: typing.Optional[str] = None,
-    removed_version: typing.Optional[str] = None,
-):
-    """
-    Marks a method or function as deprecated. Will print a DeprecationWarning
-    with reason and the given replacement. Replacement should be whatever
-    can be used to replace the deprecated method or function
-    """
-    import warnings
-
-    def decorator(fn):
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            warnings.warn(
-                f"function {fn.__name__!r} is deprecated: {reason!r}. Use {replacement!r} instead.",
-                category=DeprecationWarning,
-                stacklevel=2,
-            )
-            return fn(*args, **kwargs)
-
-        setattr(wrapper, "deprecation_reason", reason)
-        setattr(wrapper, "deprecation_starting_in", starting_version)
-        setattr(wrapper, "deprecation_remove_in", removed_version)
-        return wrapper
-
-    return decorator
-
-
 @deprecated(
     reason="This decorator is buggy and hard to maintain",
-    replacement="@enforce_annotations and add annotations to the function parameters",
+    replacement="@EnforceAnnotations and add annotations to the function parameters",
     starting_version="6.3.0",
+    removed_version="8.0.0",
 )
 def accepts(*types: type | tuple[type, ...]):
     """
@@ -464,8 +471,9 @@ def accepts(*types: type | tuple[type, ...]):
 
 @deprecated(
     reason="This decorator is buggy and hard to maintain",
-    replacement="@enforce_annotations and add annotations to the function return type",
+    replacement="@EnforceAnnotations and add annotations to the function return type",
     starting_version="6.3.0",
+    removed_version="8.0.0",
 )
 def returns(*types: type):
     """
