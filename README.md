@@ -6,7 +6,10 @@ Python decorators that I like to use a lot.
 
 [Find the pypi package here](https://pypi.org/project/tecoradors-elunico/)
 
-Named based on my name which starts with a T. You can find more information reading the docstrings of the functions
+Named based on my name which starts with a T. You can find more information reading the docstrings of the functions.
+
+**Information on how to use these decorators can be found in their docstring**
+Using `help(tecorador)` is a good way to learn about them. You can also read their docs on Github
 
 ### Decorators are
 

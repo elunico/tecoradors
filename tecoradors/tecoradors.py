@@ -101,21 +101,20 @@ def _is_special_annot(annotation: object) -> bool:
 
 
 def _special_annot_is_ok(value, annotation) -> bool:
-    match annotation:
-        case typing.Optional:
-            legal = typing.get_args(annotation)
-            if value is None or isinstance(value, legal):
-                return True
-            else:
-                return False
-        case typing.Union:
-            legals = typing.get_args(annotation)
-            if not any(isinstance(value, i) for i in legals):
-                return False
-            else:
-                return True
-        case typing.Any:
+    if annotation == typing.Optional:
+        legal = typing.get_args(annotation)
+        if value is None or isinstance(value, legal):
             return True
+        else:
+            return False
+    if annotation == typing.Union:
+        legals = typing.get_args(annotation)
+        if not any(isinstance(value, i) for i in legals):
+            return False
+        else:
+            return True
+    if annotation == typing.Any:
+        return True
     raise TypeError(f"{annotation} is not a special type")
 
 
@@ -199,10 +198,17 @@ class EnforceAnnotations:
     """
 
     def __init__(self, fn):
+        """
+        Initializer for function decorator. fn is the function whose type annotations will be
+        checked at runtime
+        """
         self.fn = fn
         functools.wraps(fn)(self)
 
     def __call__(self, *args, **kwargs):
+        """
+        Invoked in place of self.fn to perform the runtime checking of type annotations of self.fn
+        """
         return _enforce_impl_wrapper(self.type_check, self.return_check, self.fn)(
             *args, **kwargs
         )
