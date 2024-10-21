@@ -3,6 +3,7 @@ import functools
 import inspect
 import sys
 import typing
+import os
 
 
 def chained(obj, *fields):
@@ -95,7 +96,103 @@ def _isiterable(t):
         return False
 
 
-def accepts(*types: tuple[type]):
+def enforce_annotations(fn):
+    """
+    Decorator applied to functions to check annotations at runtime
+    Python does not enforce annotations of types at runtime, but this function will
+    This can incur a **significant** performance penalty
+    Set the environment variable TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION to ignore
+    all annotation enforcement: this env var will turn this decorator into a NOP
+    """
+    if os.environ.get("TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION", False):
+        return fn
+
+    NO_RET_TYPE = object()
+
+    functools.wraps(fn)
+
+    def wrapper(*args, **kwargs):
+        """
+        This function depends on __annotations__ having the types of arguments in the same order as their listing in the function signature
+        TODO: it might be a good idea to migrate to something like inspect.getfullargspec(fn) to look up types for positional args
+        using a dictionary lookup
+        """
+        annots = fn.__annotations__
+
+        # check keyword arguments by name
+        # kwargs passed to the function come in as a dictionary whose names can be looked up
+        # directly in the annotations dictionary
+        for ka, val in kwargs:
+            if not isinstance(val, typing.get_origin(annots[ka])):
+                raise TypeError(
+                    f"expected **kwargs argument {repr(ka)} to have type {annots[ka]} but got type {type(val)}"
+                )
+
+        # prevent return type from being zipped up with args types
+        if "return" in annots:
+            return_type: type = annots["return"]
+            del annots["return"]
+        else:
+            return_type: type = typing.cast(
+                type, NO_RET_TYPE
+            )  # I know, I know, but just trust me
+
+        # arguments and annotations from signature
+        for idx, (arg, (name, typ)) in enumerate(zip(args, annots.items())):
+            if not isinstance(arg, typ):
+                raise TypeError(
+                    f"expected argument {repr(name)} at pos {idx} to have type {typ} but found type {type(arg)}"
+                )
+
+        # execute the function so we can check return type
+        result = fn(*args, **kwargs)
+
+        if return_type is not NO_RET_TYPE and not isinstance(result, return_type):
+            raise TypeError(
+                f"expected function {repr(fn)} to return {return_type} but got {type(result)}"
+            )
+        return result
+
+    return wrapper
+
+
+def deprecated(
+    reason: str,
+    replacement: str,
+    starting_version: typing.Optional[str] = None,
+    removed_version: typing.Optional[str] = None,
+):
+    """
+    Marks a method or function as deprecated. Will print a DeprecationWarning
+    with reason and the given replacement. Replacement should be whatever
+    can be used to replace the deprecated method or function
+    """
+    import warnings
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            warnings.warn(
+                f"function {fn.__name__!r} is deprecated: {reason!r}. Use {replacement!r} instead.",
+                category=DeprecationWarning,
+                stacklevel=2,
+            )
+            return fn(*args, **kwargs)
+
+        setattr(wrapper, "deprecation_reason", reason)
+        setattr(wrapper, "deprecation_starting_in", starting_version)
+        setattr(wrapper, "deprecation_remove_in", removed_version)
+        return wrapper
+
+    return decorator
+
+
+@deprecated(
+    reason="This decorator is buggy and hard to maintain",
+    replacement="@enforce_annotations and add annotations to the function parameters",
+    starting_version="6.3.0",
+)
+def accepts(*types: type | tuple[type, ...]):
     """
     Provides a declaration-site and run-time check of the types of the arguments passed to a function or method
 
@@ -116,6 +213,7 @@ def accepts(*types: tuple[type]):
              given EXCEPT for 'self' and 'cls' first args
 
     """
+
     import enum
 
     def check_self_or_cls(var_names):
@@ -142,9 +240,9 @@ def accepts(*types: tuple[type]):
         )  # remove self or cls if present
         assert (
             len(types) == argcount
-        ), f"Not enough types for arg count, expected {argcount} but got {len(types)}"
+        ), f"Incorrect number of types for function, expected {argcount} but got {len(types)}. "
 
-        def _check_raw_type(a: typing.Any, t: list[type | None]) -> None:
+        def _check_raw_type(pos: int, a: typing.Any, t: tuple[type, ...]) -> None:
             """
             Determines if argument a is of type t. If t is iterable checks if a is of any of the types in t.
             If t is Self or contains Self, there is a check to get the class that defined the method and determine
@@ -163,20 +261,21 @@ def accepts(*types: tuple[type]):
             # if it not an enum otherwise treat it as a single class
             if not isinstance(t, enum.EnumMeta):
                 # if Self is given, check a against Self using _get_class_that_defined_method otherwise just check a
-                t = [_get_class_that_defined_method(f) if i is Self else i for i in t]
-                if not all(i is not None for i in t):
+                ds = [_get_class_that_defined_method(f) if i is Self else i for i in t]
+                if not all(i is not None for i in ds):
                     raise TypeError(
                         f"Self is meaningless on non-bound method {f.__name__}"
                     )
             else:
                 # if t is a single type check for Self and check for Self otherwise just check a against t
-                t = [_get_class_that_defined_method(f) if t is Self else t]
-                if any(i is None for i in t):
+                ds = [_get_class_that_defined_method(f) if t is Self else t]
+                if any(i is None for i in ds):
                     raise TypeError(
                         f"Self is meaningless on non-bound method {f.__name__}"
                     )
-            assert isinstance(a, typing.cast(tuple[type], t)), (
-                f"{f.__name__}: got argument {a} (type of {type(a)}) "
+            t = tuple(typing.cast(tuple[type], ds))
+            assert isinstance(a, t), (
+                f"{f.__name__}: got value {repr(a)} (type of {type(a)}) for argument {pos} "
                 + f"but expected argument of type(s) {t}"
             )
 
@@ -207,12 +306,16 @@ def accepts(*types: tuple[type]):
 
         @functools.wraps(f)
         def new_f(*args, **kwds):
+            if os.environ.get("TECORADORS_OVERRIDE_NO_TYPING", False):
+                return f(*args, **kwds)
             for_args = args[1:] if is_bound else args
-            for a, t in zip(for_args, types):
+            for pos, a, t in zip(range(1, len(args) + 1), for_args, types):
+                if not _isiterable(t):
+                    t = (t,)
                 if inspect.isfunction(t):
                     _check_callable(a, t)
                 else:
-                    _check_raw_type(a, list(t))
+                    _check_raw_type(pos, a, t)
             return f(*args, **kwds)
 
         return new_f
@@ -220,7 +323,12 @@ def accepts(*types: tuple[type]):
     return check_accepts
 
 
-def returns(*types: type | typing.Iterable[type]):
+@deprecated(
+    reason="This decorator is buggy and hard to maintain",
+    replacement="@enforce_annotations and add annotations to the function return type",
+    starting_version="6.3.0",
+)
+def returns(*types: type):
     """
     Run time assertions for the return type of a function. Use this decorator by annotating a function with @returns()
     and the types that you expect the function to return. Some important notes about syntax:
@@ -256,14 +364,18 @@ def returns(*types: type | typing.Iterable[type]):
         # noinspection PyTypeHints
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            if os.environ.get("TECORADORS-OVERRIDE-NO-TYPING", False):
+                return fn(*args, **kwargs)
             nonlocal types
             result = fn(*args, **kwargs)
-            types = tuple(
-                _get_class_that_defined_method(fn) if i is Self else i for i in types
-            )
+            ds = [
+                (_get_class_that_defined_method(fn) if i is Self else i) for i in types
+            ]
+
             assert all(
-                i is not None for i in types
+                i is not None for i in ds
             ), "Cannot have return type of Self on non-method object"
+            types = typing.cast(tuple[type, ...], ds)
             if isinstance(result, tuple):
                 if len(result) != len(types):
                     raise AssertionError(
@@ -274,25 +386,35 @@ def returns(*types: type | typing.Iterable[type]):
                 for value, cls in zip(result, types):
                     if _isiterable(cls) and not isinstance(cls, enum.EnumMeta):
                         cls = tuple(
-                            _get_class_that_defined_method(fn) if i is Self else i
-                            for i in typing.cast(typing.Iterable[type], cls)
+                            j
+                            for j in (
+                                _get_class_that_defined_method(fn) if i is Self else i
+                                for i in typing.cast(typing.Iterable[type], cls)
+                            )
+                            if j is not None
                         )
-                    assert isinstance(
-                        value, cls
-                    ), "Return type expected {} but " "received {} of type {}".format(
-                        cls, value, type(value)
-                    )
+                    if not isinstance(cls, enum.EnumMeta):
+                        assert isinstance(value, cls), (
+                            "Return type expected {} but "
+                            "received {} of type {}".format(
+                                cls, repr(value), type(value)
+                            )
+                        )
             else:
-                t = types[0]
+                t = types
                 if _isiterable(t) and not isinstance(t, enum.EnumMeta):
-                    t = tuple(
-                        _get_class_that_defined_method(fn) if i is Self else i
-                        for i in t
+                    t: tuple[type, ...] = tuple(
+                        j
+                        for j in (
+                            _get_class_that_defined_method(fn) if i is Self else i
+                            for i in t
+                        )
+                        if j is not None
                     )
                 assert isinstance(
                     result, t
                 ), "Return type expected {} but " "received {} of type {}".format(
-                    t, result, type(result)
+                    t, repr(result), type(result)
                 )
             return result
 
@@ -327,6 +449,7 @@ def interruptable(fn: typing.Union[typing.Callable, str]):
 
     else:
         if not isinstance(fn, str):
+            # not unreachable - python does not enforce typing
             raise TypeError(
                 "@interruptable must be passed a function or a string as its argument"
             )
@@ -947,37 +1070,6 @@ def freeze(cls):
     setattr(cls, "__init__", new_init)
 
     return cls
-
-
-def deprecated(
-    reason: str,
-    replacement: str,
-    starting_version: typing.Optional[str] = None,
-    removed_version: typing.Optional[str] = None,
-):
-    """
-    Marks a method or function as deprecated. Will print a DeprecationWarning
-    with reason and the given replacement. Replacement should be whatever
-    can be used to replace the deprecated method or function
-    """
-    import warnings
-
-    def decorator(fn):
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            warnings.warn(
-                f"function {fn.__name__!r} is deprecated: {reason!r}. Use {replacement!r} instead.",
-                category=DeprecationWarning,
-                stacklevel=2,
-            )
-            return fn(*args, **kwargs)
-
-        setattr(wrapper, "deprecation_reason", reason)
-        setattr(wrapper, "deprecation_starting_in", starting_version)
-        setattr(wrapper, "deprecation_remove_in", removed_version)
-        return wrapper
-
-    return decorator
 
 
 def log(destination: typing.IO, include_results: bool = False):

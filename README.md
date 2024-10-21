@@ -10,6 +10,8 @@ Named based on my name which starts with a T. You can find more information read
 
 ### Decorators are
 
+- enforce_annotations ***(new in 6.3.0!)**: improves @accepts and @returns*
+- deprecated
 - accepts
 - returns
 - interruptable
@@ -26,7 +28,6 @@ Named based on my name which starts with a T. You can find more information read
 - dataclass
 - final
 - freeze
-- deprecated
 - log
 - synchronized
 - count_calls
