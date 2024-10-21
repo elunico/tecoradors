@@ -10,7 +10,8 @@ Named based on my name which starts with a T. You can find more information read
 
 ### Decorators are
 
-- enforce_annotations ***(new in 6.3.0!)**: improves @accepts and @returns*
+- EnforceAnnotations ***(new in 6.4.0!)**: subclassable and customizable annotation type checking enforcer - replaces the deprecated @accepts and @returns*
+- enforce_annotations ***(new in 6.3.0!)**: convenience default function based wrapper for EnforceAnnotations class-based wrapper*
 - deprecated
 - accepts
 - returns

@@ -96,22 +96,43 @@ def _isiterable(t):
         return False
 
 
-def enforce_annotations(fn):
-    """
-    Decorator applied to functions to check annotations at runtime
-    Python does not enforce annotations of types at runtime, but this function will
-    This can incur a **significant** performance penalty
-    Set the environment variable TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION to ignore
-    all annotation enforcement: this env var will turn this decorator into a NOP
-    """
-    if os.environ.get("TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION", False):
-        return fn
+def _is_special_annot(annotation: object) -> bool:
+    return annotation in {typing.Optional, typing.Union, typing.Any}
 
-    NO_RET_TYPE = object()
 
-    functools.wraps(fn)
+def _special_annot_is_ok(value, annotation) -> bool:
+    match annotation:
+        case typing.Optional:
+            legal = typing.get_args(annotation)
+            if value is None or isinstance(value, legal):
+                return True
+            else:
+                return False
+        case typing.Union:
+            legals = typing.get_args(annotation)
+            if not any(isinstance(value, i) for i in legals):
+                return False
+            else:
+                return True
+        case typing.Any:
+            return True
+    raise TypeError(f"{annotation} is not a special type")
 
-    def wrapper(*args, **kwargs):
+
+def _isinstance_special(value, annotation):
+    if (a := typing.get_origin(annotation)) is not None:
+        annotation = a
+    return (
+        _is_special_annot(annotation) and _special_annot_is_ok(value, annotation)
+    ) or (not _is_special_annot(annotation) and isinstance(value, annotation))
+
+
+def _enforce_impl_wrapper(hook1, hook2, fn):
+    def _enforce_impl(*args, **kwargs):
+        if os.environ.get("TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION", False):
+            return fn(*args, **kwargs)
+
+        NO_RET_TYPE = object()
         """
         This function depends on __annotations__ having the types of arguments in the same order as their listing in the function signature
         TODO: it might be a good idea to migrate to something like inspect.getfullargspec(fn) to look up types for positional args
@@ -123,35 +144,147 @@ def enforce_annotations(fn):
         # kwargs passed to the function come in as a dictionary whose names can be looked up
         # directly in the annotations dictionary
         for ka, val in kwargs:
-            if not isinstance(val, typing.get_origin(annots[ka])):
-                raise TypeError(
-                    f"expected **kwargs argument {repr(ka)} to have type {annots[ka]} but got type {type(val)}"
-                )
+            # defer to type_check method but if it refuses to handle it do the default
+            if not hook1(val, ka, annots[ka]):
+                if not _isinstance_special(val, annots[ka]):
+                    raise TypeError(
+                        f"expected **kwargs argument {repr(ka)} to have type {annots[ka]} but got type {type(val)}"
+                    )
 
         # prevent return type from being zipped up with args types
         if "return" in annots:
             return_type: type = annots["return"]
             del annots["return"]
         else:
-            return_type: type = typing.cast(
-                type, NO_RET_TYPE
-            )  # I know, I know, but just trust me
+            # I know, I know, but just trust me
+            return_type: type = typing.cast(type, NO_RET_TYPE)
 
         # arguments and annotations from signature
         for idx, (arg, (name, typ)) in enumerate(zip(args, annots.items())):
-            if not isinstance(arg, typ):
-                raise TypeError(
-                    f"expected argument {repr(name)} at pos {idx} to have type {typ} but found type {type(arg)}"
-                )
+            # first defer to user defined type_check function
+            if not hook1(arg, name, typ):
+                if not _isinstance_special(arg, typ):
+                    raise TypeError(
+                        f"expected argument {repr(name)} at pos {idx} to have type {typ} but found type {type(arg)}"
+                    )
 
         # execute the function so we can check return type
         result = fn(*args, **kwargs)
 
-        if return_type is not NO_RET_TYPE and not isinstance(result, return_type):
-            raise TypeError(
-                f"expected function {repr(fn)} to return {return_type} but got {type(result)}"
-            )
+        if return_type is not NO_RET_TYPE and not hook2(result, return_type):
+            if return_type is not NO_RET_TYPE and not _isinstance_special(
+                result, return_type
+            ):
+                raise TypeError(
+                    f"expected function {repr(fn)} to return {return_type} but got {type(result)}"
+                )
         return result
+
+    return _enforce_impl
+
+
+class EnforceAnnotations:
+    """
+    Customizable class for enforcing type annotations in a function
+    Using the @EnforceAnnotations class by itself gives normal type checking behavior for parameters and annotations
+    If you want more customizable type checking you can override the type_check and return_check methods in a subclass
+    and then use your subclass as a decorator
+
+    The methods can choose to handle any situation based on value, name, or annotation type. See the methods for more info
+
+    Using this runtime type checking can incur a *significant* runtime cost. This can be overriden on all callables
+    decorated with this class using the TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION environment variable. Setting this
+    variable to any value will cause the __call__ method to just return a call to the function and skip all type checking.
+    This allows for expensive runtime enforcement in dev situations but also allows for efficiency in prod
+    """
+
+    def __init__(self, fn):
+        self.fn = fn
+        functools.wraps(fn)(self)
+
+    def __call__(self, *args, **kwargs):
+        return _enforce_impl_wrapper(self.type_check, self.return_check, self.fn)(
+            *args, **kwargs
+        )
+
+    def type_check(self, argument: object, name: str, annotation: type) -> bool:
+        """
+        This method is called *before* the default type checking of the
+        @enforce_annotations function.
+
+        Based on the parameters passed to the function, it should decide if it is willing to
+        do the type_checking. If it does it should return True. If it does not want
+        to handle the type checking, it should return False to get the default behavior
+
+        The default behavior is an isinstance check with value and annotation, except for the
+        special cases, typing.Optional, typing.Union, and typing.Any which are special cased
+        to behave intuitively based on their name. Note that type arguments are *not*
+        checked by default so list[str] will check for list but not for any particular type
+        inside the list. To do this see below
+
+        An example for this would be to specially deal with list[str] or tuple[int] or
+        any other generic types which normal isinstance checks cannot deal with. In this
+        example you might handle the type checking for list, tuple, etc. but choose to default
+        to normal type checks for everything else.
+
+        If a type check fails this method *must* raise a TypeError
+
+        @returns True if it handles the check or False if not
+
+        @raises TypeError if the type_check fails
+        """
+        return False
+
+    def return_check(self, value: object, annotation: type) -> bool:
+        """
+        This method is called *before* the default type checking of the return value
+
+        Based on the parameters passed to the function, it should decide if it is willing to
+        do the type checking for the return type.
+        If it does it should return True. If it does not want
+        to handle the type checking, it should return False to get the default behavior
+
+        The default behavior is an isinstance check with value and annotation, except for the
+        special cases, typing.Optional, typing.Union, and typing.Any which are special cased
+        to behave intuitively based on their name. Note that type arguments are *not*
+        checked by default so list[str] will check for list but not for any particular type
+        inside the list. To do this see below
+
+        An example for this would be to specially deal with list[str] or tuple[int] or
+        any other generic types which normal isinstance checks cannot deal with. In this
+        example you might handle the type checking for list, tuple, etc. but choose to default
+        to normal type checks for everything else.
+
+        If a type check fails this method *must* raise a TypeError
+
+        @returns True if it handles the check or False if not
+
+        @raises TypeError if the type_check fails
+        """
+        return False
+
+
+def enforce_annotations(fn):
+    """
+    Convenience function wrapper for the EnforceAnnotations class-based function decorator
+    More information can be found there.
+    This function implements the default behavior of the class version. See the class
+    documentation for default behavior.
+
+    The advantage to the function form is the return value is an actual function
+    rather than replacing the function with a class instance with a __call__ method
+    """
+    if os.environ.get("TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION", False):
+        return fn
+
+    def false(*args):
+        return False
+
+    NO_RET_TYPE = object()
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return _enforce_impl_wrapper(false, false, fn)(*args, **kwargs)
 
     return wrapper
 
