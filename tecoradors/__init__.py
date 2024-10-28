@@ -1,7 +1,8 @@
 from tecoradors.tecoradors import (
     deprecated,
     Self,
-    EnforceAnnotations,
+    Enforcer,
+    CompositeEnforcer,
     enforce_annotations,
     accepts,
     returns,
@@ -35,7 +36,8 @@ from tecoradors.tecoradors import (
 __all__ = [
     "deprecated",
     "Self",
-    "EnforceAnnotations",
+    "Enforcer",
+    "CompositeEnforcer",
     "enforce_annotations",
     "accepts",
     "returns",

@@ -4,6 +4,7 @@ import inspect
 import sys
 import typing
 import os
+import abc
 
 
 def chained(obj, *fields):
@@ -219,12 +220,13 @@ def _enforce_impl_wrapper(hook1, hook2, fn):
     return _enforce_impl
 
 
-class EnforceAnnotations:
+class Enforcer(abc.ABC):
     """
-    Customizable class for enforcing type annotations in a function
-    Using the @EnforceAnnotations class by itself gives normal type checking behavior for parameters and annotations
+    Customizable class for enforcing type annotations in a function.
+
+    Using the @enforce_annotations decorator by itself gives normal type checking behavior for parameters and annotations
     If you want more customizable type checking you can override the type_check and return_check methods in a subclass
-    and then use your subclass as a decorator
+    of this type and then pass it to the @enforce_annotations decorator
 
     The methods can choose to handle any situation based on value, name, or annotation type. See the methods for more info
 
@@ -234,22 +236,7 @@ class EnforceAnnotations:
     This allows for expensive runtime enforcement in dev situations but also allows for efficiency in prod
     """
 
-    def __init__(self, fn):
-        """
-        Initializer for function decorator. fn is the function whose type annotations will be
-        checked at runtime
-        """
-        self.fn = fn
-        functools.wraps(fn)(self)
-
-    def __call__(self, *args, **kwargs):
-        """
-        Invoked in place of self.fn to perform the runtime checking of type annotations of self.fn
-        """
-        return _enforce_impl_wrapper(self.type_check, self.return_check, self.fn)(
-            *args, **kwargs
-        )
-
+    @abc.abstractmethod
     def type_check(self, argument: object, name: str, annotation: type) -> bool:
         """
         This method is called *before* the default type checking of the
@@ -278,6 +265,7 @@ class EnforceAnnotations:
         """
         return False
 
+    @abc.abstractmethod
     def return_check(self, value: object, annotation: type) -> bool:
         """
         This method is called *before* the default type checking of the return value
@@ -307,7 +295,34 @@ class EnforceAnnotations:
         return False
 
 
-def enforce_annotations(fn):
+class CompositeEnforcer(Enforcer):
+    """
+    A composite enforcer can accept multiple Enforcer objects in its __init__. It also acts as an
+    Enforcer itself. When passed to @enforce_annotations, the CompositeEnforcer iterates through
+    each Enforcer instance passed to it, **in the order in which it was added**, beginning with
+    all the enforcers passed to __init__ in the order they appear in the list passed, then in sequence
+    all the ones passing to add_enforcer(). It calls the corresponding method (type_check() or return_check())
+    as appropriate until one of the contained Enforcers' methods returns True, at which point, it will return
+    True. If none of them return True, it will return False
+    """
+
+    def __init__(self, enforcers: list[Enforcer]):
+        self.enforcers = enforcers
+
+    def type_check(self, argument: object, name: str, annotation: type) -> bool:
+        for enforcer in self.enforcers:
+            if enforcer.type_check(argument, name, annotation):
+                return True
+        return False
+
+    def return_check(self, value: object, annotation: type) -> bool:
+        for enforcer in self.enforcers:
+            if enforcer.return_check(value, annotation):
+                return True
+        return False
+
+
+def enforce_annotations(obj: typing.Callable | Enforcer):
     """
     Convenience function wrapper for the EnforceAnnotations class-based function decorator
     More information can be found there.
@@ -317,19 +332,40 @@ def enforce_annotations(fn):
     The advantage to the function form is the return value is an actual function
     rather than replacing the function with a class instance with a __call__ method
     """
-    if os.environ.get("TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION", False):
-        return fn
+    if callable(obj):
+        fn = obj
+        if os.environ.get("TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION", False):
+            return fn
 
-    def false(*args):
-        return False
+        def false(*args):
+            return False
 
-    NO_RET_TYPE = object()
+        NO_RET_TYPE = object()
 
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        return _enforce_impl_wrapper(false, false, fn)(*args, **kwargs)
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            return _enforce_impl_wrapper(false, false, fn)(*args, **kwargs)
 
-    return wrapper
+        return wrapper
+    else:
+        if not isinstance(obj, Enforcer):
+            raise TypeError(
+                "@enforce_annotations must be passed an instance of Enforcer or used without parentheses"
+            )
+
+        if os.environ.get("TECORADORS_OVERRIDE_NO_ENFORCE_ANNOTATION", False):
+            return lambda fn: fn
+
+        def outer(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return _enforce_impl_wrapper(obj.type_check, obj.return_check, func)(
+                    *args, **kwargs
+                )
+
+            return wrapper
+
+        return outer
 
 
 @deprecated(
