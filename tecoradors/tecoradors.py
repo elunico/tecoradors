@@ -322,7 +322,7 @@ class CompositeEnforcer(Enforcer):
         return False
 
 
-def enforce_annotations(obj: typing.Callable | Enforcer):
+def enforce_annotations(obj: typing.Callable | Enforcer) -> typing.Callable:
     """
     Convenience function wrapper for the EnforceAnnotations class-based function decorator
     More information can be found there.

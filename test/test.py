@@ -4,30 +4,19 @@ import typing
 from tecoradors.tecoradors import enforce_annotations, Enforcer, CompositeEnforcer
 
 
-class MyEnforcer(Enforcer):
-    def type_check(self, argument: object, name: str, annotation: type) -> bool:
-        print(argument, name, annotation)
-        if annotation is int:
-            return True
-        return False
-
-    def return_check(self, value: object, annotation: type) -> bool:
-        return True
-
-
-class MyOtherEnforcer(Enforcer):
-    def type_check(self, argument: object, name: str, annotation: type) -> bool:
-        if annotation == str and name == "a":
-            return True
-        return False
-
-    def return_check(self, value: object, annotation: type) -> bool:
-        return False
-
-
-@enforce_annotations(CompositeEnforcer([MyEnforcer(), MyOtherEnforcer()]))
+@enforce_annotations
 def add(a: int, b: int) -> int:
     return a + b
+
+
+@enforce_annotations
+def mul(a: int, b: int) -> int:
+    return a * b
+
+
+@enforce_annotations
+def div(a: int, b: int) -> float:
+    return a / b
 
 
 """
@@ -46,4 +35,4 @@ runtime type checking as well
 """
 
 
-print(add("hello", " world"))
+print(add(119, add(26, 74)))
