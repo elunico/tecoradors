@@ -137,7 +137,13 @@ def _isiterable(t):
 
 
 def _is_special_annot(annotation: object) -> bool:
-    return annotation in {typing.Optional, typing.Union, typing.Any}
+    return annotation in {
+        typing.Optional,
+        typing.Union,
+        typing.Any,
+        typing.TextIO,
+        typing.IO,
+    }
 
 
 def _special_annot_is_ok(value, annotation) -> bool:
@@ -153,6 +159,8 @@ def _special_annot_is_ok(value, annotation) -> bool:
             return False
         else:
             return True
+    if annotation == typing.IO or annotation == typing.TextIO:
+        return hasattr(value, "read") and hasattr(value, "write")
     if annotation == typing.Any:
         return True
     raise TypeError(f"{annotation} is not a special type")
@@ -707,382 +715,6 @@ def spread(times: int):
     return inner
 
 
-class PredicateType:
-    """
-    A PredicateType is subclassed as a means to provide custom type checking. A PredicateType is used for value checking
-    and not instance checking. A TypeError will be raised if the value does not satisfy the predicate.
-
-    Subclasses of PredicateType are used for attribute type checking in classes decorated with @builder.
-    When an annotation is a subclass of PredicateType, the builder will use the PredicateType.check method to check
-    if the value satisfies the predicate. Otherwise, instance checking will be used, which means that the value must be of
-    an instance of the type specified by the annotation.
-
-    To use this class you must subclass and override the isacceptable method to provide the custom type checking logic.
-    The isacceptable method should return True if the value satisfies the predicate and False otherwise.
-    The isacceptable method should be a class method.
-    """
-
-    @classmethod
-    def check(cls, attr: str, value: typing.Any):
-        if not cls.isacceptable(value):
-            raise TypeError(
-                f"Excepted attribute '{attr}' to satisfy predicate {cls} but got {value}"
-            )
-
-    @classmethod
-    def isacceptable(cls, value: typing.Any) -> bool:
-        raise NotImplementedError("Subclass must implement abstract method")
-
-
-def builder(typechecking: bool | typing.Callable = True) -> typing.Any:
-    """
-    The builder decorator allows you to create builder classes based on the desired attributes and optionally types.
-
-    You can define a class with attributes and types and decorate with the builder decorator and you will get
-        -  An __init__ that takes no arguments and initializes all fields to their given values or None if no value is provided
-        -  A setX method for every attribute defined in the class which sets the corresponding field and returns self
-
-    If you decorate a class @builder you get type checking by default. This is equivalent to @builder(True) and if you
-    want to turn off type checking you can use @builder(False) or @builder(typechecking=False)
-
-    An example of how to use it
-
-    >>> @builder
-    >>> class HTTPServerOptions:
-    >>>     ip: str
-    >>>     port: int
-    >>>     username: str = 'admin'
-
-    This would generate the equivalent of
-
-    >>> class HTTPServerOptions:
-    >>>     def __init__(self):
-    >>>         self.ip = None
-    >>>         self.port = None
-    >>>         self.username = 'admin'
-    >>>
-    >>>     def setip(self, value):
-    >>>         if not isinstance(value, str):
-    >>>             raise TypeError("Excepted attribute ip of type {} but got type {}".format(str, type(value)))
-    >>>         self.ip = value
-    >>>         return self
-    >>>
-    >>>     def setport(self, value):
-    >>>         if not isinstance(value, int):
-    >>>             raise TypeError("Excepted attribute port of type {} but got type {}".format(int, type(value)))
-    >>>         self.port = value
-    >>>         return self
-    >>>
-    >>>     def setusername(self, value):
-    >>>         if not isinstance(value, str):
-    >>>             raise TypeError("Excepted attribute username of type {} but got type {}".format(str, type(value)))
-    >>>         self.username = value
-    >>>         return self
-
-    You may also annotate the attributes with a subclass of PredicateType  to customize the type checking.
-    For example, if you want to make sure that the ip address is a valid ip address you can do the following:
-
-    >>> class IPAddressPredicate(PredicateType):
-    >>>     @classmethod
-    >>>     def isacceptable(self, value: str) -> bool:
-    >>>         return re.match(r"^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", value) is not None
-
-    >>> @builder
-    >>> class HTTPServerOptions:
-    >>>     ip: IPAddressPredicate
-    >>>     port: int
-    >>>     username: str = 'admin'
-
-    Only subclasses of PredicateType can be used to do this predicate-based checking. Any other type will be
-    used for isinistance checking.
-
-    *Predicate checking is **NOT** done for the initial value on the class only in the setter*
-    """
-
-    def builder_interior(cls):
-        attributes = cls.__annotations__
-
-        def cls_init(self):
-            for attr, typename in attributes.items():
-                setattr(self, attr, getattr(cls, attr, None))
-
-        def setter_maker(attr):
-            def setter(self, value):
-                if typechecking:
-                    # cannot type check dict[str] only dict, etc.
-                    # very poor solution for Callable, but ¯\_(ツ)_/¯
-                    # also see below about the special typing.Union exception
-                    if typing.get_args(attributes[attr]):
-                        attr_type = typing.get_origin(attributes[attr])
-                        if attr_type is types.UnionType or attr_type is typing.Union:
-                            # normally we want to type check the type and ignore type parameters
-                            # but union types cannot be isinstance checked and only exist as a collection
-                            # of type parameters. Python essentially allows isinstance union checks
-                            # using a tuple of types hence this extra check
-                            attr_type = typing.get_args(attributes[attr])
-                    else:
-                        attr_type = attributes[attr]
-                    if isinstance(attr_type, str):
-                        if not isinstance(value, eval(attr_type)):
-                            raise TypeError(
-                                "Excepted attribute {} of type {} but got type {}".format(
-                                    attr, typename, type(value)
-                                )
-                            )
-                    elif isinstance(attr_type, type) and issubclass(
-                        attr_type, PredicateType
-                    ):
-                        attr_type.check(attr, value)
-                    elif not isinstance(value, attr_type):
-                        raise TypeError(
-                            "Excepted attribute {} of type {} but got type {}".format(
-                                attr, typename, type(value)
-                            )
-                        )
-                setattr(self, attr, value)
-                return self
-
-            return setter
-
-        for attr, typename in attributes.items():
-            setattr(cls, "set{}".format(attr), setter_maker(attr))
-
-        setattr(cls, "__init__", cls_init)
-        return cls
-
-    if callable(typechecking):
-        return builder_interior(typechecking)
-    else:
-        return builder_interior
-
-
-@builder
-class TattleOptions:
-    """
-    Determines what happens when a function is decorated with @tattle. See there for more. See also @builder for
-    how to construct a TattleOptions
-
-    Each option can either be None, a String, or a Callable.
-    When None, the options are ignored (default value)
-    When str, the options are printed to `stream`. The following variables can be used in all 3 on* properties
-        %NAME% – represents the name of the function being tattled
-        %ARGS% – represents a tuple of the arguments as a string
-        %KWARGS% - represents a dict of the kw-arguments as a string
-        %DATE% - represents the current time in millis since Epoch
-
-    In addition, the onexit method can also use the variable %TIME% which represents the approximate elapsed
-    running time in millis of the tattled function
-
-    The onenter property is used before calling the function. If onenter is a string, the message will be printed to
-    the 'stream' property of TattleOptions. If onenter is a callable, then it is passed first its name as a str, then
-    a tuple of *args and a dict of **kwargs that will be passed into the function when it is called.
-    This is never used if onenter is None
-
-    The onexit property is used after the function returns. If onexit is a string, the message will be printed to
-    the 'stream' property of TattleOptions. If onexit is a callable, then it is passed first its name as a str, then
-    the return value, then a tuple of *args and a dict of **kwargs that were passed into the function when it was called.
-    This is never used if onexit is None
-
-    The onexception property is only used if an exception is raised. If onexception is a string, the message will be printed to
-    the 'stream' property of TattleOptions. The callable is passed (fn_name, exception, args, kwargs)
-    where exception is the instance of the caught exception and args, and kwargs are the tuple and dict of arguments passed to
-    the function when it was called. This is never used if onexception is None or if the function returns normally
-    without raising an Exception.
-    """
-
-    onenter: typing.Callable | str | None
-    onexit: typing.Callable | str | None
-    onexception: typing.Callable | str | None
-    stream: typing.TextIO | None = sys.stdout
-
-
-def tattle(options: typing.Union[TattleOptions, typing.Callable]):
-    def fill_str_template(s, name, args, kwargs):
-        return (
-            s.replace("%NAME%", str(name))
-            .replace("%ARGS%", str(args))
-            .replace("%KWARGS%", str(kwargs))
-            .replace("%DATE%", str(time.time()))
-        )
-
-    """
-    Function decorator that allows the reporting of events. A function decorated with @tattle
-    can have the entrance, exit, and exceptions of the function reported. The `options` parameter is a TattleOptions
-    instance that can is given callables for `onenter`, `onexit`, and `onexception`. These callables are called
-    with arguments at the appropriate time. These options can also be None and no action on that event will be taken
-    """
-    if callable(options):
-
-        @functools.wraps(options)
-        def wrapper(*args, **kwargs):
-            print("Call start: {}({}, {})".format(options.__name__, args, kwargs))
-            try:
-                result = options(*args, **kwargs)
-            except Exception as e:
-                print(
-                    "Call exception [{}]: {}({}, {})".format(
-                        e, options.__name__, args, kwargs
-                    )
-                )
-            else:
-                print(
-                    "Call finished: {}({}, {})".format(options.__name__, args, kwargs)
-                )
-                return result
-
-        return wrapper
-
-    def interior(fn):
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            if options.onenter is not None:
-                if isinstance(options.onenter, str):
-                    msg = fill_str_template(options.onenter, fn.__name__, args, kwargs)
-                    options.stream.write(msg)
-                else:
-                    options.onenter(fn.__name__, args, kwargs)
-            try:
-                start = time.time()
-                result = fn(*args, **kwargs)
-                end = time.time()
-            except Exception as exception:
-                if options.onexception is not None:
-                    if isinstance(options.onexception, str):
-                        msg = fill_str_template(
-                            options.onexit, fn.__name__, args, kwargs
-                        )
-                        options.stream.write(msg)
-                    else:
-                        options.onexception(fn.__name__, exception, args, kwargs)
-                else:
-                    raise
-            else:
-                if options.onexit is not None:
-                    if isinstance(options.onexit, str):
-                        msg = fill_str_template(
-                            options.onexit, fn.__name__, args, kwargs
-                        )
-                        msg.replace("%TIME%", str(end - start))
-                        options.stream.write(msg)
-                    else:
-                        options.onexit(fn.__name__, result, args, kwargs)
-                return result
-
-        return wrapper
-
-    return interior
-
-
-def timed(fn):
-    """
-    Wraps a function using time.time() in order to time the execution of the function
-
-    Returns the a tuple of original function result and the time elapsed in
-    seconds
-    """
-    import time
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        start = time.time()
-        result = fn(*args, **kwargs)
-        end = time.time()
-        return result, end - start
-
-    return wrapper
-
-
-TupleOfExceptionTypes = typing.Tuple[typing.Type[BaseException]]
-AnyFunction = typing.Callable[[typing.Any], typing.Any]
-ExceptionCallback = typing.Callable[[BaseException], typing.Any]
-
-
-def squash(
-    exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Exception,),
-    on_squashed: typing.Union[typing.Optional[typing.Any], ExceptionCallback] = None,
-):
-    """
-    returns a function that handles exceptions differently.
-
-    if squash is used without calling it, then the decorated function that is
-    returned does the following: if the new function raises an
-    exception of type Exception or its derivatives, it is ignored and None is returned
-
-    Using squash wihtout parameters looks like this
-    @squash
-    def some_function(arg1, arg2):
-        ...
-
-    and is equivalent to writing
-
-    @squash((Exception,), on_squashed=None)
-    def some_function(arg1, arg2):
-        ...
-
-    This will cause all Exceptions that inherit from Exception to be ignored
-    and for the function to return None rather than raise the exception.
-    Note that any Exceptions that are raised that DO NOT inherit Exception
-    (such as those derived from BaseException) will be re-raised and not squashed
-    in the function
-
-    If squash is used with parameters, then:
-
-    If an exception is raised in the function that is not of a type listed in
-    the `exceptions` parameter, then the exception is raised normally
-
-    If an exception is raised in the function that IS of a type listed in
-    the `exceptions` parameter, then..
-
-        If `on_squashed` is a value (including None) then that is returned
-        If `on_squashed` is callable (has a __call__ method) then the
-          result of calling `on_squashed` with the instance of the
-          raised exception is returned
-
-    >>> @squash
-    ... def atoi(a):
-    ...     return int(a)
-    >>> atoi('5013')
-    5013
-    >>> atoi('hello') is None
-    True
-
-    >>> @squash(on_squashed=0)
-    ... def atoi(a):
-    ...     return int(a)
-    >>> atoi('37')
-    37
-    >>> atoi('4al')
-    0
-    """
-    import types
-
-    if type(exceptions) is types.FunctionType:
-        return squash()(exceptions)
-
-    def decor(fn):
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            try:
-                return fn(*args, **kwargs)
-            except BaseException as e:
-                if _isiterable(exceptions):
-                    squashed = tuple(typing.cast(TupleOfExceptionTypes, exceptions))
-                else:
-                    squashed = (exceptions,)
-                if not isinstance(e, squashed):
-                    raise
-                else:
-                    return (
-                        on_squashed(e)
-                        if hasattr(on_squashed, "__call__")
-                        else on_squashed
-                    )
-
-        return wrapper
-
-    return decor
-
-
 # decorator function
 def stringable(cls):
     """
@@ -1303,6 +935,387 @@ def freeze(cls):
     setattr(cls, "__init__", new_init)
 
     return cls
+
+
+class PredicateType:
+    """
+    A PredicateType is subclassed as a means to provide custom type checking. A PredicateType is used for value checking
+    and not instance checking. A TypeError will be raised if the value does not satisfy the predicate.
+
+    Subclasses of PredicateType are used for attribute type checking in classes decorated with @builder.
+    When an annotation is a subclass of PredicateType, the builder will use the PredicateType.check method to check
+    if the value satisfies the predicate. Otherwise, instance checking will be used, which means that the value must be of
+    an instance of the type specified by the annotation.
+
+    To use this class you must subclass and override the isacceptable method to provide the custom type checking logic.
+    The isacceptable method should return True if the value satisfies the predicate and False otherwise.
+    The isacceptable method should be a class method.
+    """
+
+    @classmethod
+    def check(cls, attr: str, value: typing.Any):
+        if not cls.isacceptable(value):
+            raise TypeError(
+                f"Excepted attribute '{attr}' to satisfy predicate {cls} but got {value}"
+            )
+
+    @classmethod
+    def isacceptable(cls, value: typing.Any) -> bool:
+        raise NotImplementedError("Subclass must implement abstract method")
+
+
+def builder(typechecking: bool | typing.Callable = True) -> typing.Any:
+    """
+    The builder decorator allows you to create builder classes based on the desired attributes and optionally types.
+
+    You can define a class with attributes and types and decorate with the builder decorator and you will get
+        -  An __init__ that takes no arguments and initializes all fields to their given values or None if no value is provided
+        -  A setX method for every attribute defined in the class which sets the corresponding field and returns self
+
+    If you decorate a class @builder you get type checking by default. This is equivalent to @builder(True) and if you
+    want to turn off type checking you can use @builder(False) or @builder(typechecking=False)
+
+    An example of how to use it
+
+    >>> @builder
+    >>> class HTTPServerOptions:
+    >>>     ip: str
+    >>>     port: int
+    >>>     username: str = 'admin'
+
+    This would generate the equivalent of
+
+    >>> class HTTPServerOptions:
+    >>>     def __init__(self):
+    >>>         self.ip = None
+    >>>         self.port = None
+    >>>         self.username = 'admin'
+    >>>
+    >>>     def setip(self, value):
+    >>>         if not isinstance(value, str):
+    >>>             raise TypeError("Excepted attribute ip of type {} but got type {}".format(str, type(value)))
+    >>>         self.ip = value
+    >>>         return self
+    >>>
+    >>>     def setport(self, value):
+    >>>         if not isinstance(value, int):
+    >>>             raise TypeError("Excepted attribute port of type {} but got type {}".format(int, type(value)))
+    >>>         self.port = value
+    >>>         return self
+    >>>
+    >>>     def setusername(self, value):
+    >>>         if not isinstance(value, str):
+    >>>             raise TypeError("Excepted attribute username of type {} but got type {}".format(str, type(value)))
+    >>>         self.username = value
+    >>>         return self
+
+    You may also annotate the attributes with a subclass of PredicateType  to customize the type checking.
+    For example, if you want to make sure that the ip address is a valid ip address you can do the following:
+
+    >>> class IPAddressPredicate(PredicateType):
+    >>>     @classmethod
+    >>>     def isacceptable(self, value: str) -> bool:
+    >>>         return re.match(r"^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", value) is not None
+
+    >>> @builder
+    >>> class HTTPServerOptions:
+    >>>     ip: IPAddressPredicate
+    >>>     port: int
+    >>>     username: str = 'admin'
+
+    Only subclasses of PredicateType can be used to do this predicate-based checking. Any other type will be
+    used for isinistance checking.
+
+    *Predicate checking is **NOT** done for the initial value on the class only in the setter*
+    """
+
+    def builder_interior(cls):
+        attributes = cls.__annotations__
+
+        def cls_init(self):
+            for attr, typename in attributes.items():
+                setattr(self, attr, getattr(cls, attr, None))
+
+        def setter_maker(attr):
+            def setter(self, value):
+                if typechecking:
+                    # cannot type check dict[str] only dict, etc.
+                    # very poor solution for Callable, but ¯\_(ツ)_/¯
+                    # also see below about the special typing.Union exception
+                    if typing.get_args(attributes[attr]):
+                        attr_type = typing.get_origin(attributes[attr])
+                        if attr_type is types.UnionType or attr_type is typing.Union:
+                            # normally we want to type check the type and ignore type parameters
+                            # but union types cannot be isinstance checked and only exist as a collection
+                            # of type parameters. Python essentially allows isinstance union checks
+                            # using a tuple of types hence this extra check
+                            attr_type = typing.get_args(attributes[attr])
+                    else:
+                        attr_type = attributes[attr]
+                    if isinstance(attr_type, str):
+                        if not isinstance(value, eval(attr_type)):
+                            raise TypeError(
+                                "Excepted attribute {} of type {} but got type {}".format(
+                                    attr, typename, type(value)
+                                )
+                            )
+                    elif isinstance(attr_type, type) and issubclass(
+                        attr_type, PredicateType
+                    ):
+                        attr_type.check(attr, value)
+                    elif not isinstance(value, attr_type):
+                        raise TypeError(
+                            "Excepted attribute {} of type {} but got type {}".format(
+                                attr, typename, type(value)
+                            )
+                        )
+                setattr(self, attr, value)
+                return self
+
+            return setter
+
+        for attr, typename in attributes.items():
+            setattr(cls, "set{}".format(attr), setter_maker(attr))
+
+        setattr(cls, "__init__", cls_init)
+        return cls
+
+    if callable(typechecking):
+        return builder_interior(typechecking)
+    else:
+        return builder_interior
+
+
+@builder
+@stringable
+class TattleOptions:
+    """
+    Determines what happens when a function is decorated with @tattle. See there for more. See also @builder for
+    how to construct a TattleOptions
+
+    Each option can either be None, a String, or a Callable.
+    When None, the options are ignored (default value)
+    When str, the options are printed to `stream`. The following variables can be used in all 3 on* properties
+        %NAME% – represents the name of the function being tattled
+        %ARGS% – represents a tuple of the arguments as a string
+        %KWARGS% - represents a dict of the kw-arguments as a string
+        %DATE% - represents the current time in millis since Epoch
+
+    In addition, the onexit method can also use the variable %TIME% which represents the approximate elapsed
+    running time in millis of the tattled function
+
+    The onenter property is used before calling the function. If onenter is a string, the message will be printed to
+    the 'stream' property of TattleOptions. If onenter is a callable, then it is passed first its name as a str, then
+    a tuple of *args and a dict of **kwargs that will be passed into the function when it is called.
+    This is never used if onenter is None
+
+    The onexit property is used after the function returns. If onexit is a string, the message will be printed to
+    the 'stream' property of TattleOptions. If onexit is a callable, then it is passed first its name as a str, then
+    the return value, then a tuple of *args and a dict of **kwargs that were passed into the function when it was called.
+    This is never used if onexit is None
+
+    The onexception property is only used if an exception is raised. If onexception is a string, the message will be printed to
+    the 'stream' property of TattleOptions. The callable is passed (fn_name, exception, args, kwargs)
+    where exception is the instance of the caught exception and args, and kwargs are the tuple and dict of arguments passed to
+    the function when it was called. This is never used if onexception is None or if the function returns normally
+    without raising an Exception.
+    """
+
+    @classmethod
+    def create(cls) -> "TattleOptions":
+        return cls()
+
+    onenter: typing.Callable | str | None
+    onexit: typing.Callable | str | None
+    onexception: typing.Callable | str | None
+    stream: typing.TextIO | None = sys.stdout
+
+
+def tattle(options: typing.Union[TattleOptions, typing.Callable]):
+    def fill_str_template(s, name, args, kwargs):
+        return (
+            s.replace("%NAME%", str(name))
+            .replace("%ARGS%", str(args))
+            .replace("%KWARGS%", str(kwargs))
+            .replace("%DATE%", str(time.time()))
+        )
+
+    """
+    Function decorator that allows the reporting of events. A function decorated with @tattle
+    can have the entrance, exit, and exceptions of the function reported. The `options` parameter is a TattleOptions
+    instance that can is given callables for `onenter`, `onexit`, and `onexception`. These callables are called
+    with arguments at the appropriate time. These options can also be None and no action on that event will be taken
+    """
+    if callable(options):
+
+        @functools.wraps(options)
+        def wrapper(*args, **kwargs):
+            print("Call start: {}({}, {})".format(options.__name__, args, kwargs))
+            try:
+                result = options(*args, **kwargs)
+            except Exception as e:
+                print(
+                    "Call exception [{}]: {}({}, {})".format(
+                        e, options.__name__, args, kwargs
+                    )
+                )
+            else:
+                print(
+                    "Call finished: {}({}, {})".format(options.__name__, args, kwargs)
+                )
+                return result
+
+        return wrapper
+
+    def interior(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            if options.onenter is not None:
+                if isinstance(options.onenter, str):
+                    msg = fill_str_template(options.onenter, fn.__name__, args, kwargs)
+                    options.stream.write(msg)
+                else:
+                    options.onenter(fn.__name__, args, kwargs)
+            try:
+                start = time.time()
+                result = fn(*args, **kwargs)
+                end = time.time()
+            except Exception as exception:
+                if options.onexception is not None:
+                    if isinstance(options.onexception, str):
+                        msg = fill_str_template(
+                            options.onexit, fn.__name__, args, kwargs
+                        )
+                        options.stream.write(msg)
+                    else:
+                        options.onexception(fn.__name__, exception, args, kwargs)
+                else:
+                    raise
+            else:
+                if options.onexit is not None:
+                    if isinstance(options.onexit, str):
+                        msg = fill_str_template(
+                            options.onexit, fn.__name__, args, kwargs
+                        )
+                        msg.replace("%TIME%", str(end - start))
+                        options.stream.write(msg)
+                    else:
+                        options.onexit(fn.__name__, result, args, kwargs)
+                return result
+
+        return wrapper
+
+    return interior
+
+
+def timed(fn):
+    """
+    Wraps a function using time.time() in order to time the execution of the function
+
+    Returns the a tuple of original function result and the time elapsed in
+    seconds
+    """
+    import time
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = fn(*args, **kwargs)
+        end = time.time()
+        return result, end - start
+
+    return wrapper
+
+
+TupleOfExceptionTypes = typing.Tuple[typing.Type[BaseException]]
+AnyFunction = typing.Callable[[typing.Any], typing.Any]
+ExceptionCallback = typing.Callable[[BaseException], typing.Any]
+
+
+def squash(
+    exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Exception,),
+    on_squashed: typing.Union[typing.Optional[typing.Any], ExceptionCallback] = None,
+):
+    """
+    returns a function that handles exceptions differently.
+
+    if squash is used without calling it, then the decorated function that is
+    returned does the following: if the new function raises an
+    exception of type Exception or its derivatives, it is ignored and None is returned
+
+    Using squash wihtout parameters looks like this
+    @squash
+    def some_function(arg1, arg2):
+        ...
+
+    and is equivalent to writing
+
+    @squash((Exception,), on_squashed=None)
+    def some_function(arg1, arg2):
+        ...
+
+    This will cause all Exceptions that inherit from Exception to be ignored
+    and for the function to return None rather than raise the exception.
+    Note that any Exceptions that are raised that DO NOT inherit Exception
+    (such as those derived from BaseException) will be re-raised and not squashed
+    in the function
+
+    If squash is used with parameters, then:
+
+    If an exception is raised in the function that is not of a type listed in
+    the `exceptions` parameter, then the exception is raised normally
+
+    If an exception is raised in the function that IS of a type listed in
+    the `exceptions` parameter, then..
+
+        If `on_squashed` is a value (including None) then that is returned
+        If `on_squashed` is callable (has a __call__ method) then the
+          result of calling `on_squashed` with the instance of the
+          raised exception is returned
+
+    >>> @squash
+    ... def atoi(a):
+    ...     return int(a)
+    >>> atoi('5013')
+    5013
+    >>> atoi('hello') is None
+    True
+
+    >>> @squash(on_squashed=0)
+    ... def atoi(a):
+    ...     return int(a)
+    >>> atoi('37')
+    37
+    >>> atoi('4al')
+    0
+    """
+    import types
+
+    if type(exceptions) is types.FunctionType:
+        return squash()(exceptions)
+
+    def decor(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except BaseException as e:
+                if _isiterable(exceptions):
+                    squashed = tuple(typing.cast(TupleOfExceptionTypes, exceptions))
+                else:
+                    squashed = (exceptions,)
+                if not isinstance(e, squashed):
+                    raise
+                else:
+                    return (
+                        on_squashed(e)
+                        if hasattr(on_squashed, "__call__")
+                        else on_squashed
+                    )
+
+        return wrapper
+
+    return decor
 
 
 def log(destination: typing.IO, include_results: bool = False):
