@@ -2,9 +2,11 @@ import enum
 import functools
 import inspect
 import sys
+import types
 import typing
 import os
 import abc
+import time
 
 
 def chained(obj, *fields):
@@ -809,8 +811,15 @@ def builder(typechecking: bool | typing.Callable = True) -> typing.Any:
                 if typechecking:
                     # cannot type check dict[str] only dict, etc.
                     # very poor solution for Callable, but ¯\_(ツ)_/¯
+                    # also see below about the special typing.Union exception
                     if typing.get_args(attributes[attr]):
                         attr_type = typing.get_origin(attributes[attr])
+                        if attr_type is types.UnionType or attr_type is typing.Union:
+                            # normally we want to type check the type and ignore type parameters
+                            # but union types cannot be isinstance checked and only exist as a collection
+                            # of type parameters. Python essentially allows isinstance union checks
+                            # using a tuple of types hence this extra check
+                            attr_type = typing.get_args(attributes[attr])
                     else:
                         attr_type = attributes[attr]
                     if isinstance(attr_type, str):
@@ -853,27 +862,49 @@ class TattleOptions:
     Determines what happens when a function is decorated with @tattle. See there for more. See also @builder for
     how to construct a TattleOptions
 
-    Each option can either be None or a Callable.
+    Each option can either be None, a String, or a Callable.
+    When None, the options are ignored (default value)
+    When str, the options are printed to `stream`. The following variables can be used in all 3 on* properties
+        %NAME% – represents the name of the function being tattled
+        %ARGS% – represents a tuple of the arguments as a string
+        %KWARGS% - represents a dict of the kw-arguments as a string
+        %DATE% - represents the current time in millis since Epoch
 
-    The onenter property is called before calling the function and it is passed a *args **kwargs splat equivalent
-    to what will be passed into the function when it is called. This is never used if onexit is None
+    In addition, the onexit method can also use the variable %TIME% which represents the approximate elapsed
+    running time in millis of the tattled function
 
-    The onexit property is called after the function returns and it is passed (result, *args, **kwargs) that is the
-    result of the function call and the same args, kwargs splat that went into the function. This is never used if
-    onexit is None *or* if an exception occurs before the function returns
+    The onenter property is used before calling the function. If onenter is a string, the message will be printed to
+    the 'stream' property of TattleOptions. If onenter is a callable, then it is passed first its name as a str, then
+    a tuple of *args and a dict of **kwargs that will be passed into the function when it is called.
+    This is never used if onenter is None
 
-    The onexception property is only called if an exception is raised. The callable is passed (exception, *args, **kwargs)
-    where exception is the instance of the caught exception and *args, and **kwargs are the splat arguments passed to
+    The onexit property is used after the function returns. If onexit is a string, the message will be printed to
+    the 'stream' property of TattleOptions. If onexit is a callable, then it is passed first its name as a str, then
+    the return value, then a tuple of *args and a dict of **kwargs that were passed into the function when it was called.
+    This is never used if onexit is None
+
+    The onexception property is only used if an exception is raised. If onexception is a string, the message will be printed to
+    the 'stream' property of TattleOptions. The callable is passed (fn_name, exception, args, kwargs)
+    where exception is the instance of the caught exception and args, and kwargs are the tuple and dict of arguments passed to
     the function when it was called. This is never used if onexception is None or if the function returns normally
     without raising an Exception.
     """
 
-    onenter: typing.Callable
-    onexit: typing.Callable
-    onexception: typing.Callable
+    onenter: typing.Callable | str | None
+    onexit: typing.Callable | str | None
+    onexception: typing.Callable | str | None
+    stream: typing.TextIO | None = sys.stdout
 
 
 def tattle(options: typing.Union[TattleOptions, typing.Callable]):
+    def fill_str_template(s, name, args, kwargs):
+        return (
+            s.replace("%NAME%", str(name))
+            .replace("%ARGS%", str(args))
+            .replace("%KWARGS%", str(kwargs))
+            .replace("%DATE%", str(time.time()))
+        )
+
     """
     Function decorator that allows the reporting of events. A function decorated with @tattle
     can have the entrance, exit, and exceptions of the function reported. The `options` parameter is a TattleOptions
@@ -905,17 +936,36 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             if options.onenter is not None:
-                options.onenter(*args, **kwargs)
+                if isinstance(options.onenter, str):
+                    msg = fill_str_template(options.onenter, fn.__name__, args, kwargs)
+                    options.stream.write(msg)
+                else:
+                    options.onenter(fn.__name__, args, kwargs)
             try:
+                start = time.time()
                 result = fn(*args, **kwargs)
+                end = time.time()
             except Exception as exception:
                 if options.onexception is not None:
-                    options.onexception(exception, *args, **kwargs)
+                    if isinstance(options.onexception, str):
+                        msg = fill_str_template(
+                            options.onexit, fn.__name__, args, kwargs
+                        )
+                        options.stream.write(msg)
+                    else:
+                        options.onexception(fn.__name__, exception, args, kwargs)
                 else:
                     raise
             else:
                 if options.onexit is not None:
-                    options.onexit(result, *args, **kwargs)
+                    if isinstance(options.onexit, str):
+                        msg = fill_str_template(
+                            options.onexit, fn.__name__, args, kwargs
+                        )
+                        msg.replace("%TIME%", str(end - start))
+                        options.stream.write(msg)
+                    else:
+                        options.onexit(fn.__name__, result, args, kwargs)
                 return result
 
         return wrapper
