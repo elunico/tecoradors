@@ -166,12 +166,12 @@ def _special_annot_is_ok(value, annotation) -> bool:
     raise TypeError(f"{annotation} is not a special type")
 
 
-def _isinstance_special(value, annotation):
-    if (a := typing.get_origin(annotation)) is not None:
-        annotation = a
-    return (
-        _is_special_annot(annotation) and _special_annot_is_ok(value, annotation)
-    ) or (not _is_special_annot(annotation) and isinstance(value, annotation))
+def _isinstance_special(value, annot):
+    if typing.get_origin(annot) is not None:
+        annot = typing.get_origin(annot)
+    return (_is_special_annot(annot) and _special_annot_is_ok(value, annot)) or (
+        not _is_special_annot(annot) and isinstance(value, annot)
+    )
 
 
 def _enforce_impl_wrapper(hook1, hook2, fn):
@@ -1197,7 +1197,7 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
                         msg = fill_str_template(
                             options.onexit, fn.__name__, args, kwargs
                         )
-                        msg.replace("%TIME%", str(end - start))
+                        msg = msg.replace("%TIME%", str(end - start))
                         options.stream.write(msg)
                     else:
                         options.onexit(fn.__name__, result, args, kwargs)
