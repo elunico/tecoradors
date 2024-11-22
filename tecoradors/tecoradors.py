@@ -1594,3 +1594,81 @@ def precompute(
             return decorator
 
         return wrapper
+
+
+V = typing.TypeVar("V")
+
+
+class Result(typing.Generic[V]):
+    """
+    Simple algebraic type for representing either a value or exception
+    """
+
+    def __init__(self, value: V | None, exception: Exception | None):
+        self.value = value
+        self.exception = exception
+
+    def __str__(self) -> str:
+        if self.exception is None:
+            return "Result[success]"
+        else:
+            return "Result[failure]"
+
+    def __repr__(self) -> str:
+        if self.exception is None:
+            return "Result(value={})".format(repr(self.value))
+        else:
+            return "Result(exception={})".format(repr(self.exception))
+
+
+def resultify(fn):
+    """
+    Turns a function that can raise into a function that returns a Result
+    Result.value is the return value of the original function if it returns or successfully or None if it failed
+    Result.exception is the exception raised by the original function if it raised or None if it completed normally
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return Result(fn(*args, **kwargs), None)
+        except Exception as e:
+            return Result(None, e)
+
+    return wrapper
+
+
+EXC_SELF = object()
+
+
+def exc_to_bool(
+    exception_yields=False,
+    block_exc: typing.Sequence[type[BaseException]] = [Exception],
+):
+    """
+    Turns a function that can raise or return a T into a function that returns a bool | T
+    The function is called and if it returns normally the function return value is returned to the caller
+    If the function raises an exception then the boolean value of `exception_yields` is returned to the caller
+    If `exception_yields` is EXC_SELF then the raised exception object is returned to the caller
+    The function only converts to the yield those exceptions who are a subtype of the any of the exceptions
+    in the `block_exc` parameter
+    """
+    if callable(exception_yields):
+        return exc_to_bool()(exception_yields)
+
+    def interior(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except BaseException as e:
+                if any(isinstance(e, i) for i in block_exc):
+                    if exception_yields is EXC_SELF:
+                        return e
+                    return exception_yields
+
+                raise e
+
+        return wrapper
+
+    return interior

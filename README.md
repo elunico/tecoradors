@@ -39,6 +39,8 @@ Using `help(tecorador)` is a good way to learn about them. You can also read the
 - count_calls
 - lazy
 - precompute
+- resultify
+- exc_to_bool
 
 ### Support from types
 
