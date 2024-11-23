@@ -1154,15 +1154,11 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
             try:
                 result = options(*args, **kwargs)
             except Exception as e:
-                print(
-                    "Call exception [{}]: {}({}, {})".format(
-                        e, options.__name__, args, kwargs
-                    )
-                )
+                fmts = (e, options.__name__, args, kwargs)
+                print("Call exception [{}]: {}({}, {})".format(*fmts))
             else:
-                print(
-                    "Call finished: {}({}, {})".format(options.__name__, args, kwargs)
-                )
+                fmts = (options.__name__, args, kwargs)
+                print("Call finished: {}({}, {})".format(*fmts))
                 return result
 
         return wrapper
@@ -1502,6 +1498,10 @@ def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
     """
 
     class descriptor(Descriptor):
+        def __init__(self):
+            self.was_set = False
+            self.value: T = typing.cast(T, None)
+
         def __get__(
             self,
             receiver: typing.Optional[R],
@@ -1511,9 +1511,12 @@ def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
         ) -> typing.Union[T, typing.Self]:
             if receiver is None:
                 return self
-            value = method(receiver, *args, **kwargs)
-            setattr(receiver, method.__name__, value)
-            return value
+            if not self.was_set:
+                self.value = method(receiver, *args, **kwargs)
+                self.was_set = True
+                setattr(receiver, method.__name__, self.value)
+
+            return self.value
 
     return descriptor()
 
