@@ -1498,10 +1498,6 @@ def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
     """
 
     class descriptor(Descriptor):
-        def __init__(self):
-            self.was_set = False
-            self.value: T = typing.cast(T, None)
-
         def __get__(
             self,
             receiver: typing.Optional[R],
@@ -1511,12 +1507,9 @@ def lazy(method: typing.Callable[[typing.Any], T]) -> Descriptor:
         ) -> typing.Union[T, typing.Self]:
             if receiver is None:
                 return self
-            if not self.was_set:
-                self.value = method(receiver, *args, **kwargs)
-                self.was_set = True
-                setattr(receiver, method.__name__, self.value)
-
-            return self.value
+            value = method(receiver, *args, **kwargs)
+            setattr(owner, method.__name__, value)
+            return value
 
     return descriptor()
 
