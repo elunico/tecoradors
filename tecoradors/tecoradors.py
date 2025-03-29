@@ -1668,3 +1668,34 @@ def exc_to_bool(
         return wrapper
 
     return interior
+
+
+
+def decurryable(fn):
+    """
+    A decorator that makes a curried function into a function that can take multiple arguments OR can be curried.
+    A function, f: A -> B -> C can be called as: f(a, b) -> C or f(a)(b) -> C
+    This decorator allows you to call the function in either manner. If you call it with multiple arguments
+    it will evaluate the function immediately and return the result. If you call it with a single argument
+    it will return a callable that takes the next argument and returns the result of the function.
+    
+    This decorator only works in one direction and the original function must be curried.
+    This will *NOT* make a non-curried function into a curried function. 
+    """
+    class Wrapper:
+        def __init__(self):
+            super().__init__()
+            self.impl = fn
+
+        @functools.wraps(fn)
+        def __call__(self, *args):
+            args = list(args)
+            t = self.impl  # Start with the implementation method
+            while args:
+                t = t(args.pop(0))
+            return t
+
+        def impl(self, *args):
+            return fn(self, *args)
+
+    return Wrapper()

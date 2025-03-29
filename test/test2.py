@@ -1,7 +1,7 @@
 import sys
 
 sys.path.insert(1, "tecoradors")
-from tecoradors import resultify, exc_to_bool
+from tecoradors import exc_to_bool, resultify, EXC_SELF
 
 
 @resultify
@@ -15,7 +15,7 @@ print(readall("test/test.py"))
 print(readall("test/noexist.txt"))
 
 
-@exc_to_bool
+@exc_to_bool(exception_yields=EXC_SELF)
 def funct(b):
     if b:
         raise ValueError("An error occurred")
@@ -23,6 +23,6 @@ def funct(b):
         return -3.14
 
 
-print(funct(False))
+print(repr(funct(False)))
 
-print(funct(True))
+print(repr(funct(True)))
