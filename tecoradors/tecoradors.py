@@ -453,7 +453,8 @@ def accepts(*types: type | tuple[type, ...]):
             # if it not an enum otherwise treat it as a single class
             if not isinstance(t, enum.EnumMeta):
                 # if Self is given, check a against Self using _get_class_that_defined_method otherwise just check a
-                ds = [_get_class_that_defined_method(f) if i is Self else i for i in t]
+                ds = [_get_class_that_defined_method(
+                    f) if i is Self else i for i in t]
                 if not all(i is not None for i in ds):
                     raise TypeError(
                         f"Self is meaningless on non-bound method {f.__name__}"
@@ -581,7 +582,8 @@ def returns(*types: type):
                         cls = tuple(
                             j
                             for j in (
-                                _get_class_that_defined_method(fn) if i is Self else i
+                                _get_class_that_defined_method(
+                                    fn) if i is Self else i
                                 for i in typing.cast(typing.Iterable[type], cls)
                             )
                             if j is not None
@@ -599,7 +601,8 @@ def returns(*types: type):
                     t: tuple[type, ...] = tuple(
                         j
                         for j in (
-                            _get_class_that_defined_method(fn) if i is Self else i
+                            _get_class_that_defined_method(
+                                fn) if i is Self else i
                             for i in t
                         )
                         if j is not None
@@ -868,7 +871,8 @@ def final(cls):
     """
 
     def error(*args, **kwargs):
-        raise TypeError("Cannot inherit from final class {}".format(repr(cls.__name__)))
+        raise TypeError(
+            "Cannot inherit from final class {}".format(repr(cls.__name__)))
 
     setattr(cls, "__init_subclass__", error)
     return cls
@@ -1150,7 +1154,8 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
 
         @functools.wraps(options)
         def wrapper(*args, **kwargs):
-            print("Call start: {}({}, {})".format(options.__name__, args, kwargs))
+            print("Call start: {}({}, {})".format(
+                options.__name__, args, kwargs))
             try:
                 result = options(*args, **kwargs)
             except Exception as e:
@@ -1168,7 +1173,8 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
         def wrapper(*args, **kwargs):
             if options.onenter is not None:
                 if isinstance(options.onenter, str):
-                    msg = fill_str_template(options.onenter, fn.__name__, args, kwargs)
+                    msg = fill_str_template(
+                        options.onenter, fn.__name__, args, kwargs)
                     options.stream.write(msg)
                 else:
                     options.onenter(fn.__name__, args, kwargs)
@@ -1184,7 +1190,8 @@ def tattle(options: typing.Union[TattleOptions, typing.Callable]):
                         )
                         options.stream.write(msg)
                     else:
-                        options.onexception(fn.__name__, exception, args, kwargs)
+                        options.onexception(
+                            fn.__name__, exception, args, kwargs)
                 else:
                     raise
             else:
@@ -1229,8 +1236,10 @@ ExceptionCallback = typing.Callable[[BaseException], typing.Any]
 
 
 def squash(
-    exceptions: typing.Union[TupleOfExceptionTypes, AnyFunction] = (Exception,),
-    on_squashed: typing.Union[typing.Optional[typing.Any], ExceptionCallback] = None,
+    exceptions: typing.Union[TupleOfExceptionTypes,
+                             AnyFunction] = (Exception,),
+    on_squashed: typing.Union[typing.Optional[typing.Any],
+                              ExceptionCallback] = None,
 ):
     """
     returns a function that handles exceptions differently.
@@ -1297,7 +1306,8 @@ def squash(
                 return fn(*args, **kwargs)
             except BaseException as e:
                 if _isiterable(exceptions):
-                    squashed = tuple(typing.cast(TupleOfExceptionTypes, exceptions))
+                    squashed = tuple(typing.cast(
+                        TupleOfExceptionTypes, exceptions))
                 else:
                     squashed = (exceptions,)
                 if not isinstance(e, squashed):
@@ -1343,7 +1353,8 @@ def log(destination: typing.IO, include_results: bool = False):
             try:
                 result = fn(*args, **kwargs)
             except Exception as e:
-                destination.write(f"Exception raised during function call: {e!r}")
+                destination.write(
+                    f"Exception raised during function call: {e!r}")
                 raise
             else:
                 if include_results:
@@ -1583,7 +1594,8 @@ def precompute(
             def decorator(*args):
                 if args not in cache:
                     raise NoSuchValue(
-                        "{} was not precomputed for the given function".format(args)
+                        "{} was not precomputed for the given function".format(
+                            args)
                     )
                 return cache[args]
 
@@ -1670,7 +1682,6 @@ def exc_to_bool(
     return interior
 
 
-
 def decurryable(fn):
     """
     A decorator that makes a curried function into a function that can take multiple arguments OR can be curried.
@@ -1678,24 +1689,29 @@ def decurryable(fn):
     This decorator allows you to call the function in either manner. If you call it with multiple arguments
     it will evaluate the function immediately and return the result. If you call it with a single argument
     it will return a callable that takes the next argument and returns the result of the function.
-    
+
     This decorator only works in one direction and the original function must be curried.
-    This will *NOT* make a non-curried function into a curried function. 
+    This will *NOT* make a non-curried function into a curried function.
     """
     class Wrapper:
-        def __init__(self):
+        def __init__(self, f):
             super().__init__()
-            self.impl = fn
+            if f.__code__.co_argcount == 0:
+                raise ValueError(
+                    "Function must have at least one argument")
+            self.f = f
+            functools.update_wrapper(self, f)
 
-        @functools.wraps(fn)
         def __call__(self, *args):
-            args = list(args)
-            t = self.impl  # Start with the implementation method
-            while args:
-                t = t(args.pop(0))
-            return t
+            if not args:
+                raise ValueError(
+                    "Function must be called with >= 1 argument")
+            f = self.impl
+            for arg in args:
+                f = f(arg)
+            return f
 
         def impl(self, *args):
-            return fn(self, *args)
+            return self.f(*args)
 
-    return Wrapper()
+    return Wrapper(fn)
